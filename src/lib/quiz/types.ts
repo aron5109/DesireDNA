@@ -1,6 +1,10 @@
 export const standardValues = ["love_it","like_it","tried_neutral","tried_disliked","want_to_try","maybe_conditions","not_interested","hard_limit","prefer_not_to_answer"] as const;
 export type StandardValue = typeof standardValues[number];
-export type AnswerValue = StandardValue | string[];
+/**
+ * Single-choice values are narrowed against `standardValues` at the API
+ * boundary. Multi-select questions use their own curated string values.
+ */
+export type AnswerValue = string | string[];
 export interface AnswerOption { value:string; label:string; score?:number; boundary?:boolean; excluded?:boolean }
 export interface Question { id:string; version:string; categoryId:string; categoryLabel:string; shortLabel:string; prompt:string; helpText?:string; responseType:"single_choice"|"multi_select"|"frequency"|"preference_scale"; role:"self"|"giving"|"receiving"|"watching"|"being_watched"|"mutual"; intensity:1|2|3|4|5; answerOptions:readonly AnswerOption[]; scoringEnabled:boolean; comparisonEnabled:boolean; sensitiveTags:readonly string[]; sortOrder:number }
 export interface QuizAnswer { questionId:string; value:AnswerValue }
