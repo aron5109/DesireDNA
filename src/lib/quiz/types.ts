@@ -1,4 +1,4 @@
-export const standardValues = ["love_it","like_it","tried_neutral","tried_disliked","want_to_try","maybe_conditions","not_interested","hard_limit","prefer_not_to_answer"] as const;
+export const standardValues = ["like_it","tried_neutral","tried_disliked","want_to_try","maybe_conditions","not_interested","hard_limit","prefer_not_to_answer"] as const;
 export type StandardValue = typeof standardValues[number];
 /**
  * Single-choice values are narrowed against `standardValues` at the API
