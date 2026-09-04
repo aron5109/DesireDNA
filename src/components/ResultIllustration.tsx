@@ -3,9 +3,14 @@ interface ResultIllustrationProps {
   label: string;
 }
 
-/** Original decorative result artwork. Text beside the image carries meaning. */
+/**
+ * Original decorative result artwork: a double helix medallion with a mood
+ * accent. Purely decorative — the result name and percentages beside it carry
+ * the meaning, so nothing here is the sole source of information.
+ */
 export function ResultIllustration({ adventureIndex, label }: ResultIllustrationProps) {
   const kind = adventureIndex < 25 ? "halo" : adventureIndex < 45 ? "playful" : adventureIndex < 85 ? "horns" : "flame";
+  const gradientId = `result-strand-${kind}`;
 
   return (
     <svg
@@ -15,17 +20,56 @@ export function ResultIllustration({ adventureIndex, label }: ResultIllustration
       viewBox="0 0 160 160"
     >
       <defs>
-        <linearGradient id={`result-${kind}`} x1="0" x2="1" y1="0" y2="1">
+        <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
           <stop stopColor="#fff5e9" />
           <stop offset="1" stopColor="#e9637b" />
         </linearGradient>
       </defs>
-      {kind === "halo" && <ellipse cx="80" cy="30" fill="none" rx="35" ry="10" stroke="#fff5e9" strokeWidth="5" />}
-      {kind === "playful" && <path d="M45 48 Q80 18 115 48" fill="none" stroke="#fff5e9" strokeLinecap="round" strokeWidth="5" />}
-      {kind === "horns" && <path d="M48 56 Q22 35 30 14 Q57 30 62 51 M112 56 Q138 35 130 14 Q103 30 98 51" fill="none" stroke="#e9637b" strokeLinecap="round" strokeWidth="6" />}
-      {kind === "flame" && <path d="M80 8 C105 36 91 50 116 69 C143 90 117 145 80 148 C38 145 25 99 48 72 C61 57 54 39 64 27 C65 49 82 54 80 8Z" fill={`url(#result-${kind})`} opacity=".25" stroke="#e9637b" strokeWidth="4" />}
-      <circle cx="80" cy="86" fill={`url(#result-${kind})`} opacity=".14" r="47" stroke="#e9637b" strokeWidth="3" />
-      <path d="M58 55 C110 73 49 100 102 122 M102 55 C50 73 111 100 58 122 M62 65 H98 M62 112 H98" fill="none" stroke={`url(#result-${kind})`} strokeLinecap="round" strokeWidth="5" />
+
+      {/* Mood accent above the medallion. */}
+      {kind === "halo" && (
+        <ellipse cx="80" cy="24" fill="none" rx="30" ry="8" stroke="#fff5e9" strokeWidth="4" opacity=".9" />
+      )}
+      {kind === "playful" && (
+        <g stroke="#fff5e9" strokeLinecap="round" strokeWidth="4" opacity=".9">
+          <path d="M52 30 L52 18" />
+          <path d="M80 26 L80 12" />
+          <path d="M108 30 L108 18" />
+        </g>
+      )}
+      {kind === "horns" && (
+        <path
+          d="M60 43 C 52 33 45 22 41 10 C 51 25 63 35 73 41 Z M100 43 C 108 33 115 22 119 10 C 109 25 97 35 87 41 Z"
+          fill="#e9637b"
+          opacity=".9"
+        />
+      )}
+      {kind === "flame" && (
+        <g>
+          <path
+            d="M80 3 C 95 19 93 30 86 38 C 83 41 80 42 80 42 C 80 42 77 41 74 38 C 67 30 65 19 80 3 Z"
+            fill="#e9637b"
+            opacity=".85"
+          />
+          <path d="M80 16 C 86 25 85 33 80 39 C 75 33 74 25 80 16 Z" fill="#fff5e9" opacity=".7" />
+        </g>
+      )}
+
+      {/* Medallion. */}
+      <circle cx="80" cy="92" fill="#e9637b" opacity=".08" r="52" />
+      <circle cx="80" cy="92" fill="none" opacity=".45" r="52" stroke="#e9637b" strokeWidth="2" />
+
+      {/* Double helix: two strands crossing three times, joined by rungs. */}
+      <g fill="none" stroke={`url(#${gradientId})`} strokeLinecap="round" strokeWidth="5">
+        <path d="M56 54 C 56 67, 104 79, 104 92 C 104 105, 56 117, 56 130" />
+        <path d="M104 54 C 104 67, 56 79, 56 92 C 56 105, 104 117, 104 130" />
+      </g>
+      <g stroke="#fff5e9" strokeLinecap="round" strokeWidth="3" opacity=".55">
+        <path d="M62 58 H98" />
+        <path d="M63 87 H97" />
+        <path d="M63 97 H97" />
+        <path d="M62 126 H98" />
+      </g>
     </svg>
   );
 }

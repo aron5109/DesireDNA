@@ -2,6 +2,8 @@ import "server-only";
 
 import { z } from "zod";
 
+import { ConfigurationError } from "./logging";
+
 const schema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(20),
@@ -34,11 +36,11 @@ export function env() {
 
   if (!parsed.success) {
     const names = parsed.error.issues.map((issue) => issue.path.join("."));
-    throw new Error(`Server configuration invalid: ${names.join(", ")}`);
+    throw new ConfigurationError(`Server configuration invalid: ${names.join(", ")}`);
   }
 
   if (Buffer.from(parsed.data.PROFILE_ENCRYPTION_KEY, "base64").length !== 32) {
-    throw new Error(
+    throw new ConfigurationError(
       "PROFILE_ENCRYPTION_KEY must contain exactly 32 base64-encoded bytes.",
     );
   }
