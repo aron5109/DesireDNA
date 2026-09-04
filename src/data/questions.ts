@@ -21,4 +21,26 @@ export const questions:Question[]=Object.entries(groups).flatMap(([categoryId,to
 export const pornCategories=["Amateur adults","Professional or cinematic","Romantic","Couples","Solo women","Solo men","Lesbian adults","Gay male adults","Bisexual adults","Trans adults","Oral-focused","Anal-focused","Toys","Consensual rough content","BDSM","Dominance","Submission","Adult role-play","Threesomes with two women and one man","Threesomes with two men and one woman","Group sex","Consensual gangbang","Mature adults","Adult animation with clearly adult characters only","Voyeur or exhibition fantasy involving informed adults"];
 questions.push({id:"porn_categories",version:QUIZ_VERSION,categoryId:"porn",categoryLabel:"Adult Media Preferences",shortLabel:"adult media categories",prompt:"Which adult-only media categories do you enjoy?",helpText:"Optional. Select any that apply. Only mutual selections can appear in a comparison.",responseType:"multi_select",role:"self",intensity:1,answerOptions:[...pornCategories.map(value=>({value,label:value,score:0})),{value:"prefer_not_to_answer",label:"Prefer not to answer",excluded:true}],scoringEnabled:false,comparisonEnabled:true,sensitiveTags:["adult_media"],sortOrder:order++});
 export const raceSensitiveQuestion:Question={...questions.at(-1)!,id:"porn_racial_ethnic",shortLabel:"multi-ethnic adult media",prompt:"Do you select interracial or multi-ethnic adult content?",responseType:"single_choice",answerOptions:STANDARD_OPTIONS,scoringEnabled:false,comparisonEnabled:false,sensitiveTags:["racial_ethnic_data"],sortOrder:order++};
-export function getQuestions(){return process.env.NEXT_PUBLIC_ENABLE_RACE_SENSITIVE_ITEMS==="true"?[...questions,raceSensitiveQuestion]:questions}
+export function getQuestions() {
+  const enabled =
+    process.env.NEXT_PUBLIC_ENABLE_RACE_SENSITIVE_ITEMS === "true"
+      ? [...questions, raceSensitiveQuestion]
+      : questions;
+
+  // Explicitly impossible in a production build. This keeps Playwright runs
+  // short without changing the production question bank.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.NEXT_PUBLIC_E2E_SHORT_QUIZ === "true"
+  ) {
+    const firstByCategory = new Map<string, Question>();
+    for (const question of enabled) {
+      if (!firstByCategory.has(question.categoryId)) {
+        firstByCategory.set(question.categoryId, question);
+      }
+    }
+    return [...firstByCategory.values()];
+  }
+
+  return enabled;
+}

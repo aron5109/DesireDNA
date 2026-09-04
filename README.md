@@ -10,7 +10,7 @@ Every participant must be 18+, capable, voluntary, sober enough to consent, info
 
 ## Stack and local setup
 
-Node.js 20.9+, Next.js App Router, strict TypeScript, React, Tailwind, Zod, server-only Supabase JS, AES-256-GCM, and Vitest.
+Node.js 24.x (configured in Vercel Project Settings), Next.js App Router, strict TypeScript, React, Tailwind, Zod, server-only Supabase JS, AES-256-GCM, and Vitest. Keep local and hosted builds on the same Node major; `package.json` intentionally does not override the Vercel setting. The audited native install scripts for `esbuild` and `unrs-resolver` are explicitly allowed in `package.json`.
 
 ```bash
 npm ci
@@ -58,7 +58,7 @@ The server creates a 256-bit owner token in an HttpOnly, Secure-in-production, S
 
 1. Import the GitHub repository in Vercel and select Next.js.
 2. Add every variable above to Production/Preview as appropriate. Secrets must never be `NEXT_PUBLIC_`.
-3. Schedule `GET /api/maintenance/purge` daily and send `Authorization: Bearer $CRON_SECRET` (Vercel Cron or an external scheduler).
+3. `vercel.json` schedules `GET /api/maintenance/purge` daily. Vercel sends `Authorization: Bearer $CRON_SECRET` when that project variable is configured; an external scheduler must send the same header.
 4. If enabling Turnstile, create a widget for the deployment domains and configure both keys. Complete server verification before public launch; the UI fields are reserved but no production bypass exists.
 5. Deploy a preview, run mobile/keyboard checks, confirm CSP and no-store headers, test expiry/deletion, and inspect logs for sensitive-data absence.
 
