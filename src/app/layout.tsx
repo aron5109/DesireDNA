@@ -1,0 +1,3 @@
+import type {Metadata} from "next";import "./globals.css";import {SiteHeader,SiteFooter} from "@/components/SiteChrome";
+export const metadata:Metadata={title:{default:"DesireDNA — Decode what you both desire",template:"%s | DesireDNA"},description:"A private 18+ preference quiz for consenting adults. Answer privately, receive your DesireCode, and compare mutual interests.",robots:{index:true,follow:true}};
+export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body className="font-sans antialiased"><SiteHeader/>{children}<SiteFooter/></body></html>}

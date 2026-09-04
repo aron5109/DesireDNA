@@ -1,0 +1,3 @@
+import "server-only";import {z} from "zod";
+const schema=z.object({SUPABASE_URL:z.string().url(),SUPABASE_SERVICE_ROLE_KEY:z.string().min(20),PROFILE_ENCRYPTION_KEY:z.string().min(40),PROFILE_ENCRYPTION_KEY_VERSION:z.coerce.number().int().positive().default(1),SHARE_CODE_HMAC_KEY:z.string().min(32),OWNER_TOKEN_HMAC_KEY:z.string().min(32),RATE_LIMIT_HMAC_KEY:z.string().min(32),CRON_SECRET:z.string().min(24)});
+export function env(){const out=schema.safeParse(process.env);if(!out.success)throw new Error(`Server configuration invalid: ${out.error.issues.map(i=>i.path.join(".")).join(", ")}`);if(Buffer.from(out.data.PROFILE_ENCRYPTION_KEY,"base64").length!==32)throw new Error("PROFILE_ENCRYPTION_KEY must be 32 base64-encoded bytes");return out.data}

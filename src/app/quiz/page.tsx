@@ -1,0 +1,1 @@
+import type {Metadata} from "next";import {QuizExperience} from "@/components/QuizExperience";export const metadata:Metadata={title:"Private quiz",robots:{index:false,follow:false}};export default function Quiz(){return <main className="mx-auto max-w-2xl px-4 py-6"><QuizExperience/></main>}
