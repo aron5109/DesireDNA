@@ -1,0 +1,3 @@
+# Architecture
+
+The App Router serves public informational pages and noindexed quiz/result/comparison pages. `QuizExperience` keeps unfinished answers only in `sessionStorage`; after submission the server validates IDs/options, computes the authoritative result, encrypts one payload, and clears client progress. Route handlers are the sole sensitive data boundary. Supabase receives ciphertext, lookup HMACs, lifecycle metadata, and pseudonymous rate events. Comparisons decrypt two compatible versions in server memory and return only derived fields allowed by the intersection of both sharing modes; they are never persisted.
