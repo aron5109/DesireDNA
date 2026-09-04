@@ -10,7 +10,7 @@ Every participant must be 18+, capable, voluntary, sober enough to consent, info
 
 ## Stack and local setup
 
-Node.js 24.x, Next.js App Router, strict TypeScript, React, Tailwind, Zod, server-only Supabase JS, AES-256-GCM, and Vitest. The Node major matches the Vercel project setting so local and hosted builds use the same runtime. The audited native install scripts for `esbuild` and `unrs-resolver` are explicitly allowed in `package.json`.
+Node.js 20.9+, Next.js App Router, strict TypeScript, React, Tailwind, Zod, server-only Supabase JS, AES-256-GCM, and Vitest.
 
 ```bash
 npm ci
