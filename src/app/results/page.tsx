@@ -1,0 +1,1 @@
+import type {Metadata} from "next";import {ResultExperience} from "@/components/ResultExperience";export const metadata:Metadata={title:"Your private result",robots:{index:false,follow:false}};export const dynamic="force-dynamic";export default function Results(){return <main className="mx-auto max-w-3xl px-4 py-8"><ResultExperience/></main>}
