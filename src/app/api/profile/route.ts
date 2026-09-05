@@ -27,8 +27,15 @@ function failure(scope: string, error: unknown): NextResponse {
   logServerError(scope, error);
 
   if (error instanceof ConfigurationError) {
+    // Variable names and reasons only — never a value. Without them an
+    // operator has no way to tell which secret the deployment is missing.
     return NextResponse.json(
-      { error: "DesireDNA is not fully configured yet. Please try again later." },
+      {
+        error:
+          "DesireDNA is not fully configured. The server is missing required environment variables — see /api/health for the list, then redeploy after setting them.",
+        missingConfiguration: error.details?.missing ?? [],
+        invalidConfiguration: error.details?.invalid ?? [],
+      },
       { status: 503, headers: noStore },
     );
   }

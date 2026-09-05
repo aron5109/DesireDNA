@@ -15,3 +15,15 @@ succeeds — an incomplete lockfile fails the build before any code runs.
 `Authorization: Bearer $CRON_SECRET`; any external scheduler must send the same
 header. Expired rows are also removed opportunistically after successful API
 calls, and expired profiles are never returned even before cleanup runs.
+
+## Diagnosing a misconfigured deployment
+
+`GET /api/health` returns 200 `{"status":"ok"}` when every server variable is
+present and usable, and 503 with the names of whatever is missing or invalid
+otherwise. It returns names and reasons only — never a value — and touches
+neither the database nor any profile. Profile creation returns the same list in
+`missingConfiguration` / `invalidConfiguration`, which the quiz renders, so the
+failure names its own cause rather than dead-ending.
+
+Environment variables apply at build time on Vercel: after adding them, trigger
+a new deployment, or the running one keeps its old (empty) values.

@@ -38,6 +38,28 @@ bank to one question per category. That flag is ignored whenever
 
 Apply `supabase/migrations/202609040001_initial_schema.sql` in a new Supabase project (CLI `supabase db push`, or the SQL editor), then configure the environment. The migration enables RLS, revokes client roles, and has no public policies. Only the service-role server client is used.
 
+## Checking a deployment
+
+`GET /api/health` reports whether the server has everything it needs:
+
+```bash
+curl https://your-deployment.example.com/api/health
+```
+
+A healthy deployment returns `{"status":"ok"}`. Otherwise it returns 503 and
+names each variable that is missing or unusable — names and reasons only, never
+a value. The quiz shows the same list if profile creation fails, so a
+misconfigured deployment says what to fix instead of failing opaquely.
+
+**Environment variables only take effect on a new deployment.** After adding
+them in Vercel, redeploy; the running deployment keeps the values it was built
+with.
+
+Supabase variables are also accepted under any integration prefix
+(`<storename>_SUPABASE_URL`, `<storename>_SUPABASE_SERVICE_ROLE_KEY`) and under
+the newer `SUPABASE_SECRET_KEY` name, so the Vercel/Supabase integration works
+whatever the store is called. A plain `SUPABASE_URL` always wins.
+
 ## Environment
 
 | Variable | Purpose / format |

@@ -64,6 +64,7 @@ export function QuizExperience() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [setupProblems, setSetupProblems] = useState<string[]>([]);
   const [skipRequest, setSkipRequest] = useState<SkipRequest>(null);
   const [skipAcknowledged, setSkipAcknowledged] = useState(false);
   const [reviewAnswers, setReviewAnswers] = useState<AnswerMap | null>(null);
@@ -104,6 +105,7 @@ export function QuizExperience() {
     setReviewAnswers(null);
     setBusy(true);
     setError("");
+    setSetupProblems([]);
 
     const submittedAlias = alias || generateAlias();
     if (submittedAlias !== alias) setAlias(submittedAlias);
@@ -142,7 +144,15 @@ export function QuizExperience() {
       }
 
       if (!response.ok) {
-        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+          missingConfiguration?: string[];
+          invalidConfiguration?: { name: string; reason: string }[];
+        };
+        setSetupProblems([
+          ...(data.missingConfiguration ?? []).map((name) => `${name} is not set`),
+          ...(data.invalidConfiguration ?? []).map((entry) => `${entry.name} ${entry.reason}`),
+        ]);
         throw new Error(data.error ?? "We could not save your profile.");
       }
 
@@ -354,7 +364,20 @@ export function QuizExperience() {
       {error && (
         <div role="alert" className="mb-4 rounded-xl border border-rose/50 bg-rose/10 p-4">
           <p>{error}</p>
-          <button className="mt-2 text-sm font-semibold underline" onClick={() => void finish(answers)}>
+          {setupProblems.length > 0 && (
+            <>
+              <p className="mt-3 text-sm font-semibold">The deployment still needs:</p>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-muted">
+                {setupProblems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+              <p className="mt-2 text-sm text-muted">
+                Set these in your hosting provider and redeploy. Your answers are still saved in this tab.
+              </p>
+            </>
+          )}
+          <button className="mt-3 text-sm font-semibold underline" onClick={() => void finish(answers)}>
             Try creating my result again
           </button>
         </div>
