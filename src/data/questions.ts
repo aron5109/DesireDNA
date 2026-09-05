@@ -17,7 +17,55 @@ const groups = {
 } as const;
 const labels:Record<string,string>={everyday:"Everyday Intimacy",physical:"Positions, Pace & Style",oral:"Oral Preferences",anal:"Anal Interests",power:"Power, Control & Sensory",toys:"Toys & Role-play",watching:"Watching & Recording",groups:"Groups & Consensual Non-monogamy",fluids:"Fluid & Intense Interests",communication:"Communication & Boundaries"};
 let order=0;
-export const questions:Question[]=Object.entries(groups).flatMap(([categoryId,topics])=>topics.map((topic,index)=>({id:`${categoryId}_${String(index+1).padStart(2,"0")}`,version:QUIZ_VERSION,categoryId,categoryLabel:labels[categoryId],shortLabel:topic,prompt:`How do you feel about ${topic}?`,helpText:categoryId==="watching"?"DesireDNA never accepts or stores intimate media.":undefined,responseType:"single_choice",role:"self",intensity:categoryId==="communication"?1:2,answerOptions:STANDARD_OPTIONS,scoringEnabled:true,comparisonEnabled:true,sensitiveTags:categoryId==="fluids"?["optional_intense"]:[],sortOrder:order++})));
+
+/** Relative intensity per category, used for pacing and future filtering. */
+const intensityByCategory: Record<string, 1 | 2 | 3 | 4 | 5> = {
+  communication: 1, everyday: 1, physical: 2, oral: 3, toys: 3,
+  watching: 3, anal: 4, power: 4, groups: 4, fluids: 5,
+};
+
+/**
+ * Derives the participant role from the topic wording so that giving,
+ * receiving, watching, and being-watched variants stay distinguishable in the
+ * data model rather than all collapsing to "self".
+ */
+function roleFor(topic: string): Question["role"] {
+  if (/^being watched|watching you|^being recorded|^being the focus/.test(topic)) return "being_watched";
+  if (/^watching|^a partner watching/.test(topic)) return "watching";
+  if (/^receiving|^being restrained|^being physically guided|^a partner using toys|^a partner finishing|^a partner initiating|^a partner being on top/.test(topic)) {
+    return "receiving";
+  }
+  if (/^giving|^recording a partner|^restraining a partner|^physically guiding|^using toys on a partner/.test(topic)) return "giving";
+  if (/^mutual|^discussing|^agreeing|^checking in|^sharing fantasies|^same-room|^consensual couple|^swinging|^an agreed open|^face-to-face/.test(topic)) {
+    return "mutual";
+  }
+  return "self";
+}
+
+export const questions: Question[] = Object.entries(groups).flatMap(([categoryId, topics]) =>
+  topics.map((topic, index) => ({
+    id: `${categoryId}_${String(index + 1).padStart(2, "0")}`,
+    version: QUIZ_VERSION,
+    categoryId,
+    categoryLabel: labels[categoryId],
+    shortLabel: topic,
+    prompt: `How do you feel about ${topic}?`,
+    helpText:
+      categoryId === "watching"
+        ? "DesireDNA never accepts or stores intimate media."
+        : categoryId === "fluids"
+          ? "This category is entirely optional — skipping it does not affect anything else."
+          : undefined,
+    responseType: "single_choice" as const,
+    role: roleFor(topic),
+    intensity: intensityByCategory[categoryId] ?? 2,
+    answerOptions: STANDARD_OPTIONS,
+    scoringEnabled: true,
+    comparisonEnabled: true,
+    sensitiveTags: categoryId === "fluids" ? ["optional_intense"] : [],
+    sortOrder: order++,
+  })),
+);
 export const pornCategories=["Amateur adults","Professional or cinematic","Romantic","Couples","Solo women","Solo men","Lesbian adults","Gay male adults","Bisexual adults","Trans adults","Oral-focused","Anal-focused","Toys","Consensual rough content","BDSM","Dominance","Submission","Adult role-play","Threesomes with two women and one man","Threesomes with two men and one woman","Group sex","Consensual gangbang","Mature adults","Adult animation with clearly adult characters only","Voyeur or exhibition fantasy involving informed adults"];
 questions.push({id:"porn_categories",version:QUIZ_VERSION,categoryId:"porn",categoryLabel:"Adult Media Preferences",shortLabel:"adult media categories",prompt:"Which adult-only media categories do you enjoy?",helpText:"Optional. Select any that apply. Only mutual selections can appear in a comparison.",responseType:"multi_select",role:"self",intensity:1,answerOptions:pornCategories.map(value=>({value,label:value,score:0})),scoringEnabled:false,comparisonEnabled:true,sensitiveTags:["adult_media"],sortOrder:order++});
 export const raceSensitiveQuestion:Question={...questions.at(-1)!,id:"porn_racial_ethnic",shortLabel:"multi-ethnic adult media",prompt:"Do you select interracial or multi-ethnic adult content?",responseType:"single_choice",answerOptions:STANDARD_OPTIONS,scoringEnabled:false,comparisonEnabled:false,sensitiveTags:["racial_ethnic_data"],sortOrder:order++};

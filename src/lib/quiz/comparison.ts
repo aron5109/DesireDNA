@@ -1,3 +1,123 @@
-import { questions } from "@/data/questions"; import type { ProfilePayload,ShareMode } from "./types";
-export interface Comparison {alignment:number;mutuallyAnswered:number;strongMatches:string[];sharedCuriosities:string[];sharedBoundaries:number;categoryAlignment:Record<string,number>;mutualPornCategories:string[];mode:ShareMode;talkItThrough?:string[];boundaryMismatches?:string[]}
-export function compareProfiles(a:ProfilePayload,b:ProfilePayload):Comparison{const am=new Map(a.answers.map(x=>[x.questionId,x.value])),bm=new Map(b.answers.map(x=>[x.questionId,x.value]));const strong:string[]=[],curious:string[]=[],talk:string[]=[],boundaries:string[]=[];const align=new Map<string,number[]>();let mutual=0;for(const q of questions){if(!q.comparisonEnabled)continue;const av=am.get(q.id),bv=bm.get(q.id);if(!av||!bv||av==="prefer_not_to_answer"||bv==="prefer_not_to_answer"||Array.isArray(av)||Array.isArray(bv))continue;const ao=q.answerOptions.find(o=>o.value===av),bo=q.answerOptions.find(o=>o.value===bv);if(ao?.score===undefined||bo?.score===undefined)continue;mutual++;const min=Math.min(ao.score,bo.score),max=Math.max(ao.score,bo.score);if(min>=70)strong.push(q.shortLabel);if(min>=40&&(av==="want_to_try"||av==="maybe_conditions"||bv==="want_to_try"||bv==="maybe_conditions"))curious.push(q.shortLabel);if(max>=70&&min>=25&&min<=55)talk.push(q.shortLabel);if((av==="hard_limit"&&bo.score>=70)||(bv==="hard_limit"&&ao.score>=70))boundaries.push(q.shortLabel);const arr=align.get(q.categoryId)??[];arr.push(100-Math.abs(ao.score-bo.score));align.set(q.categoryId,arr)}const categoryAlignment=Object.fromEntries([...align].map(([k,v])=>[k,Math.round(v.reduce((x,y)=>x+y,0)/v.length)]));const vals=Object.values(categoryAlignment);const mode:ShareMode=a.shareMode==="full_comparison"&&b.shareMode==="full_comparison"?"full_comparison":"mutual_only";const pa=am.get("porn_categories"),pb=bm.get("porn_categories");const result:Comparison={alignment:vals.length?Math.round(vals.reduce((x,y)=>x+y,0)/vals.length):0,mutuallyAnswered:mutual,strongMatches:strong,sharedCuriosities:curious,sharedBoundaries:boundaries.length,categoryAlignment,mutualPornCategories:Array.isArray(pa)&&Array.isArray(pb)?pa.filter(x=>pb.includes(x)):[],mode};if(mode==="full_comparison"){result.talkItThrough=talk;result.boundaryMismatches=boundaries}return result}
+import { getQuestions } from "@/data/questions";
+import type { ProfilePayload, ShareMode } from "./types";
+
+export interface Comparison {
+  alignment: number;
+  mutuallyAnswered: number;
+  strongMatches: string[];
+  sharedCuriosities: string[];
+  /** Aggregate count only — never the specific boundaries. */
+  sharedBoundaries: number;
+  categoryAlignment: Record<string, number>;
+  categoryLabels: Record<string, string>;
+  mutualPornCategories: string[];
+  mode: ShareMode;
+  /** Non-identifying display handles, safe to show to both adults. */
+  selfAlias: string;
+  partnerAlias: string;
+  /** Present only when both profiles independently opted into full comparison. */
+  talkItThrough?: string[];
+  boundaryMismatches?: string[];
+}
+
+const isComparable = (value: string | string[] | undefined): value is string =>
+  typeof value === "string" && value !== "prefer_not_to_answer";
+
+/**
+ * Derives the permitted comparison for two profiles. Only aggregate, mutual
+ * information leaves this function: raw answers, one-sided interests, skips,
+ * and (in mutual-only mode) every difference stay private.
+ */
+export function compareProfiles(self: ProfilePayload, partner: ProfilePayload): Comparison {
+  const selfAnswers = new Map(self.answers.map((answer) => [answer.questionId, answer.value]));
+  const partnerAnswers = new Map(partner.answers.map((answer) => [answer.questionId, answer.value]));
+
+  const strongMatches: string[] = [];
+  const sharedCuriosities: string[] = [];
+  const talkItThrough: string[] = [];
+  const boundaryMismatches: string[] = [];
+  const alignmentByCategory = new Map<string, number[]>();
+  const categoryLabels: Record<string, string> = {};
+
+  let mutuallyAnswered = 0;
+
+  for (const question of getQuestions()) {
+    if (!question.comparisonEnabled) continue;
+
+    const selfValue = selfAnswers.get(question.id);
+    const partnerValue = partnerAnswers.get(question.id);
+    if (!isComparable(selfValue) || !isComparable(partnerValue)) continue;
+
+    const selfOption = question.answerOptions.find((option) => option.value === selfValue);
+    const partnerOption = question.answerOptions.find((option) => option.value === partnerValue);
+    if (selfOption?.score === undefined || partnerOption?.score === undefined) continue;
+
+    mutuallyAnswered++;
+    const lowest = Math.min(selfOption.score, partnerOption.score);
+    const highest = Math.max(selfOption.score, partnerOption.score);
+    const curious =
+      selfValue === "want_to_try" ||
+      selfValue === "maybe_conditions" ||
+      partnerValue === "want_to_try" ||
+      partnerValue === "maybe_conditions";
+
+    if (lowest >= 70) strongMatches.push(question.shortLabel);
+    else if (lowest >= 40 && curious) sharedCuriosities.push(question.shortLabel);
+
+    if (highest >= 70 && lowest >= 25 && lowest <= 55) talkItThrough.push(question.shortLabel);
+    if (
+      (selfValue === "hard_limit" && partnerOption.score >= 70) ||
+      (partnerValue === "hard_limit" && selfOption.score >= 70)
+    ) {
+      boundaryMismatches.push(question.shortLabel);
+    }
+
+    const scores = alignmentByCategory.get(question.categoryId) ?? [];
+    scores.push(100 - Math.abs(selfOption.score - partnerOption.score));
+    alignmentByCategory.set(question.categoryId, scores);
+    categoryLabels[question.categoryId] = question.categoryLabel;
+  }
+
+  const categoryAlignment = Object.fromEntries(
+    [...alignmentByCategory].map(([categoryId, scores]) => [
+      categoryId,
+      Math.round(scores.reduce((a, b) => a + b, 0) / scores.length),
+    ]),
+  );
+  const categoryValues = Object.values(categoryAlignment);
+
+  // Full comparison requires both adults to have opted in independently.
+  const mode: ShareMode =
+    self.shareMode === "full_comparison" && partner.shareMode === "full_comparison"
+      ? "full_comparison"
+      : "mutual_only";
+
+  const selfMedia = selfAnswers.get("porn_categories");
+  const partnerMedia = partnerAnswers.get("porn_categories");
+
+  const comparison: Comparison = {
+    alignment: categoryValues.length
+      ? Math.round(categoryValues.reduce((a, b) => a + b, 0) / categoryValues.length)
+      : 0,
+    mutuallyAnswered,
+    strongMatches,
+    sharedCuriosities,
+    sharedBoundaries: boundaryMismatches.length,
+    categoryAlignment,
+    categoryLabels,
+    mutualPornCategories:
+      Array.isArray(selfMedia) && Array.isArray(partnerMedia)
+        ? selfMedia.filter((category) => partnerMedia.includes(category))
+        : [],
+    mode,
+    selfAlias: self.alias,
+    partnerAlias: partner.alias,
+  };
+
+  if (mode === "full_comparison") {
+    comparison.talkItThrough = talkItThrough;
+    comparison.boundaryMismatches = boundaryMismatches;
+  }
+
+  return comparison;
+}

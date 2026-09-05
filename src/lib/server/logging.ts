@@ -1,0 +1,34 @@
+import "server-only";
+
+import { ZodError } from "zod";
+
+/**
+ * Redacted server logging.
+ *
+ * Only a scope and a short error identity are ever written. Answers, results,
+ * DesireCodes, owner tokens, keys, and request bodies must never reach the
+ * logs, so a Zod failure is reduced to the field paths that failed — its
+ * default message embeds the offending input.
+ */
+export function logServerError(scope: string, error: unknown): void {
+  console.error(`[desiredna:${scope}] ${describe(error)}`);
+}
+
+function describe(error: unknown): string {
+  if (error instanceof ZodError) {
+    const fields = error.issues.map((issue) => issue.path.join(".") || "(root)").join(", ");
+    return `ZodError: invalid fields: ${fields}`;
+  }
+  if (error instanceof Error) {
+    return error.message ? `${error.name}: ${error.message}` : error.name;
+  }
+  return "UnknownError";
+}
+
+/** Raised when the deployment is missing or misconfiguring server secrets. */
+export class ConfigurationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigurationError";
+  }
+}
