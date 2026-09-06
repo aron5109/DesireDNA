@@ -146,6 +146,35 @@ describe("POST /api/profile", () => {
     );
     expect(response.status).toBe(500);
   });
+
+  it("names a missing table instead of failing opaquely", async () => {
+    // What an unapplied initial migration actually looks like.
+    database.failure = 'relation "public.quiz_profiles" does not exist';
+    const response = await profileRoute.POST(post("http://localhost/api/profile", submission(keen())));
+    database.failure = null;
+
+    const body = (await response.json()) as { error: string; storageProblem?: string; hint?: string };
+    expect(response.status).toBe(500);
+    expect(body.storageProblem).toContain("quiz_profiles");
+    expect(body.hint).toContain("/api/health");
+  });
+
+  it("never passes a stored value through the storage reason", async () => {
+    const { describeStorageError } = await import("@/lib/server/logging");
+
+    // Postgres puts key values in `details`; only code and message may escape.
+    const pgError = {
+      code: "23505",
+      message: 'duplicate key value violates unique constraint "quiz_profiles_share_code_hash_key"',
+      details: "Key (share_code_hash)=(deadbeefcafe) already exists.",
+      hint: "some hint",
+    };
+
+    const described = describeStorageError(pgError) as string;
+    expect(described).toContain("23505");
+    expect(described).not.toContain("deadbeefcafe");
+    expect(described).not.toContain("some hint");
+  });
 });
 
 describe("GET /api/profile", () => {

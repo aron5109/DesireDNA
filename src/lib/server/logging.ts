@@ -14,6 +14,19 @@ export function logServerError(scope: string, error: unknown): void {
   console.error(`[desiredna:${scope}] ${describe(error)}`);
 }
 
+/**
+ * A Supabase/Postgres error, reduced to the parts that describe the *schema*
+ * problem. `details` and `hint` can echo a stored value, so they are dropped.
+ */
+export function describeStorageError(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as { code?: unknown; message?: unknown };
+  if (typeof candidate.message !== "string") return null;
+
+  const code = typeof candidate.code === "string" ? `${candidate.code}: ` : "";
+  return `${code}${candidate.message}`;
+}
+
 function describe(error: unknown): string {
   if (error instanceof ZodError) {
     const fields = error.issues.map((issue) => issue.path.join(".") || "(root)").join(", ");

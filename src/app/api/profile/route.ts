@@ -8,7 +8,7 @@ import { scoreResponses } from "@/lib/quiz/scoring";
 import { AnswerValidationError, createProfileSchema, validateResponses } from "@/lib/quiz/validation";
 import { generateDesireCode, generateOwnerToken } from "@/lib/server/codes";
 import { clearOwnerCookie, ownerCookie, setOwnerCookie } from "@/lib/server/cookies";
-import { ConfigurationError, logServerError } from "@/lib/server/logging";
+import { ConfigurationError, describeStorageError, logServerError } from "@/lib/server/logging";
 import {
   byOwner,
   createStoredProfile,
@@ -51,8 +51,16 @@ function failure(scope: string, error: unknown): NextResponse {
       { status: 400, headers: noStore },
     );
   }
+  // A storage failure is almost always a schema that was never applied, so the
+  // reason is passed through: it names the missing object, never a stored value.
+  const reason = describeStorageError(error);
   return NextResponse.json(
-    { error: "We could not reach your private storage. Please try again." },
+    {
+      error: reason
+        ? "Your answers could not be saved because the database is not set up correctly."
+        : "We could not reach your private storage. Please try again.",
+      ...(reason ? { storageProblem: reason, hint: "Open /api/health for the full setup check." } : {}),
+    },
     { status: 500, headers: noStore },
   );
 }
