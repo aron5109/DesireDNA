@@ -228,10 +228,12 @@ export function QuizExperience() {
           error?: string;
           missingConfiguration?: string[];
           invalidConfiguration?: { name: string; reason: string }[];
+          storageProblem?: string;
         };
         setSetupProblems([
           ...(data.missingConfiguration ?? []).map((name) => `${name} is not set`),
           ...(data.invalidConfiguration ?? []).map((entry) => `${entry.name} ${entry.reason}`),
+          ...(data.storageProblem ? [data.storageProblem] : []),
         ]);
         throw new Error(data.error ?? "We could not save your profile.");
       }
@@ -373,14 +375,20 @@ export function QuizExperience() {
             <p>{error}</p>
             {setupProblems.length > 0 && (
               <>
-                <p className="mt-3 text-sm font-semibold">The deployment still needs:</p>
+                <p className="mt-3 text-sm font-semibold">What the server reported:</p>
                 <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-muted">
                   {setupProblems.map((problem) => (
                     <li key={problem}>{problem}</li>
                   ))}
                 </ul>
+                <p className="mt-2 text-sm text-muted">
+                  Your answers are still here. Open <code>/api/health</code> for the full setup check, then try again.
+                </p>
               </>
             )}
+            <button onClick={() => void submit()} className="btn btn-secondary mt-3">
+              Try again
+            </button>
           </div>
         )}
 
