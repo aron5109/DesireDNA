@@ -36,34 +36,43 @@ type ShareModeRoute = typeof import("@/app/api/profile/share-mode/route");
 let profileRoute: ProfileRoute;
 let compareRoute: CompareRoute;
 let shareModeRoute: ShareModeRoute;
-let questionIds: string[];
+let cardIds: string[];
+let quizVersion: string;
 
 const post = (url: string, body: unknown) =>
   new NextRequest(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", origin: "http://localhost", host: "localhost" },
     body: JSON.stringify(body),
   });
 
 const get = (url: string) => new NextRequest(url, { method: "GET" });
 
-function submission(answers: { questionId: string; value: string | string[] }[], alias?: string) {
+type Responses = Record<string, unknown>;
+
+function submission(responses: Responses, alias?: string) {
   return {
     ageConfirmed: true,
     explicitContentConfirmed: true,
     storageConsent: true,
     deletionUnderstood: true,
+    quizVersion,
     retentionDays: 7,
     tone: "playful",
     ...(alias ? { alias } : {}),
-    answers,
+    responses,
   };
 }
 
+/** A handful of plain "Into it" answers on interest cards. */
+function keen(count = 3): Responses {
+  return Object.fromEntries(cardIds.slice(0, count).map((id) => [id, { kind: "interest", interest: "yes" }]));
+}
+
 /** Creates a profile and returns its response body plus its owner cookie. */
-async function createProfile(answers: { questionId: string; value: string | string[] }[], alias?: string) {
+async function createProfile(responses: Responses, alias?: string) {
   jar.delete("ddna_owner");
-  const response = await profileRoute.POST(post("http://localhost/api/profile", submission(answers, alias)));
+  const response = await profileRoute.POST(post("http://localhost/api/profile", submission(responses, alias)));
   const body = (await response.json()) as { desireCode?: string; alias?: string; error?: string };
   const cookie = jar.get("ddna_owner");
   return { status: response.status, body, cookie };
@@ -73,8 +82,9 @@ beforeAll(async () => {
   profileRoute = await import("@/app/api/profile/route");
   compareRoute = await import("@/app/api/compare/route");
   shareModeRoute = await import("@/app/api/profile/share-mode/route");
-  const { questions } = await import("@/data/questions");
-  questionIds = questions.map((question) => question.id);
+  const { getCards, CURRENT_QUIZ_VERSION } = await import("@/data/bank/registry");
+  quizVersion = CURRENT_QUIZ_VERSION;
+  cardIds = getCards().filter((card) => card.responseType === "interest").map((card) => card.id);
 });
 
 beforeEach(() => {
@@ -84,7 +94,7 @@ beforeEach(() => {
 
 describe("POST /api/profile", () => {
   it("stores an encrypted profile and returns the owner's result", async () => {
-    const created = await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    const created = await createProfile(keen());
 
     expect(created.status).toBe(201);
     expect(created.body.desireCode).toMatch(/^DDNA-(?:[A-HJ-NP-Z2-9]{4}-){3}[A-HJ-NP-Z2-9]{4}$/);
@@ -95,35 +105,35 @@ describe("POST /api/profile", () => {
     // Nothing sensitive may be readable in the stored row.
     const stored = JSON.stringify(row);
     expect(stored).not.toContain(created.body.desireCode as string);
-    expect(stored).not.toContain("like_it");
+    expect(stored).not.toContain("interest");
     expect(stored).not.toContain(created.cookie as string);
   });
 
   it("assigns a random alias when the client does not send one", async () => {
-    const created = await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    const created = await createProfile(keen());
     expect(created.body.alias).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+ \d{4}$/);
   });
 
   it("replaces an alias that is not from the curated word list", async () => {
-    const created = await createProfile([{ questionId: questionIds[0], value: "like_it" }], "<script>evil</script>");
+    const created = await createProfile(keen(), "<script>evil</script>");
     expect(created.body.alias).not.toContain("script");
     expect(created.body.alias).toMatch(/^[A-Z][a-z]+ [A-Z][a-z]+ \d{4}$/);
   });
 
   it("rejects unknown question IDs", async () => {
-    const created = await createProfile([{ questionId: "not_a_real_question", value: "like_it" }]);
+    const created = await createProfile({ not_a_real_question: { kind: "interest", interest: "yes" } });
     expect(created.status).toBe(400);
     expect(database.rows("quiz_profiles")).toHaveLength(0);
   });
 
   it("rejects answer values a question does not offer", async () => {
-    const created = await createProfile([{ questionId: questionIds[0], value: "absolutely_not_an_option" }]);
+    const created = await createProfile({ [cardIds[0]]: { kind: "interest", interest: "absolutely_not_an_option" } });
     expect(created.status).toBe(400);
     expect(database.rows("quiz_profiles")).toHaveLength(0);
   });
 
   it("rejects a submission without every consent confirmation", async () => {
-    const body = { ...submission([{ questionId: questionIds[0], value: "like_it" }]), ageConfirmed: false };
+    const body = { ...submission(keen()), ageConfirmed: false };
     const response = await profileRoute.POST(post("http://localhost/api/profile", body));
     expect(response.status).toBe(400);
     expect(database.rows("quiz_profiles")).toHaveLength(0);
@@ -132,7 +142,7 @@ describe("POST /api/profile", () => {
   it("reports storage failures as a server error rather than bad input", async () => {
     database.failure = "connection refused";
     const response = await profileRoute.POST(
-      post("http://localhost/api/profile", submission([{ questionId: questionIds[0], value: "like_it" }])),
+      post("http://localhost/api/profile", submission(keen())),
     );
     expect(response.status).toBe(500);
   });
@@ -140,18 +150,18 @@ describe("POST /api/profile", () => {
 
 describe("GET /api/profile", () => {
   it("returns the owner's own result and never caches it", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     const response = await profileRoute.GET(get("http://localhost/api/profile"));
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    const body = (await response.json()) as { result: { adventureIndex: number }; answers?: unknown };
-    expect(body.result.adventureIndex).toBe(100);
-    expect(body.answers).toBeUndefined();
+    const body = (await response.json()) as { result: { scoredCount: number }; responses?: unknown };
+    expect(body.result.scoredCount).toBe(3);
+    expect(body.responses).toBeUndefined();
   });
 
   it("refuses a wrong owner token", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     jar.set("ddna_owner", "an-owner-token-that-was-never-issued");
 
     const response = await profileRoute.GET(get("http://localhost/api/profile"));
@@ -159,7 +169,7 @@ describe("GET /api/profile", () => {
   });
 
   it("refuses a request with no owner cookie", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     jar.delete("ddna_owner");
 
     const response = await profileRoute.GET(get("http://localhost/api/profile"));
@@ -167,7 +177,7 @@ describe("GET /api/profile", () => {
   });
 
   it("refuses an expired profile even before cleanup has run", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     database.rows("quiz_profiles")[0].expires_at = new Date(Date.now() - 60_000).toISOString();
 
     const response = await profileRoute.GET(get("http://localhost/api/profile"));
@@ -175,7 +185,7 @@ describe("GET /api/profile", () => {
   });
 
   it("refuses a revoked profile", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     database.rows("quiz_profiles")[0].revoked_at = new Date().toISOString();
 
     const response = await profileRoute.GET(get("http://localhost/api/profile"));
@@ -185,7 +195,7 @@ describe("GET /api/profile", () => {
 
 describe("DELETE /api/profile", () => {
   it("hard-deletes the row and clears the cookie", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
     expect(database.rows("quiz_profiles")).toHaveLength(1);
 
     const response = await profileRoute.DELETE(new NextRequest("http://localhost/api/profile", { method: "DELETE" }));
@@ -195,9 +205,150 @@ describe("DELETE /api/profile", () => {
   });
 });
 
+describe("profile lifecycle", () => {
+  it("issues a replacement code and stops the old one working", async () => {
+    const created = await createProfile(keen());
+    const oldCode = created.body.desireCode as string;
+
+    const rotated = await profileRoute.PATCH(
+      new NextRequest("http://localhost/api/profile", {
+        method: "PATCH",
+        headers: { origin: "http://localhost", host: "localhost" },
+      }),
+    );
+    const { desireCode: newCode } = (await rotated.json()) as { desireCode: string };
+
+    expect(rotated.status).toBe(200);
+    expect(newCode).not.toBe(oldCode);
+    // Still exactly one profile, still owned by the same person.
+    expect(database.rows("quiz_profiles")).toHaveLength(1);
+
+    const partnerLookup = await profileRoute.GET(get("http://localhost/api/profile"));
+    expect(((await partnerLookup.json()) as { desireCode: string }).desireCode).toBe(newCode);
+
+    // The old code no longer resolves for anyone.
+    const owner = jar.get("ddna_owner") as string;
+    const other = await createProfile(keen());
+    jar.set("ddna_owner", owner);
+    void other;
+    jar.set("ddna_owner", owner);
+
+    const stale = await compareRoute.POST(post("http://localhost/api/compare", { desireCode: oldCode }));
+    expect(stale.status).toBe(404);
+  });
+
+  it("keeps the existing profile when a replacement cannot be saved", async () => {
+    await createProfile(keen());
+    const before = database.rows("quiz_profiles")[0];
+
+    database.failure = "connection refused";
+    const response = await profileRoute.POST(
+      post("http://localhost/api/profile", { ...submission(keen()), replaceExisting: true }),
+    );
+    database.failure = null;
+
+    expect(response.status).toBe(500);
+    // Nothing was removed on the way to a failure.
+    expect(database.rows("quiz_profiles")).toContain(before);
+  });
+
+  it("refuses a cross-site state change", async () => {
+    await createProfile(keen());
+    const foreign = new NextRequest("http://localhost/api/profile", {
+      method: "DELETE",
+      headers: { origin: "https://evil.example", host: "localhost", "sec-fetch-site": "cross-site" },
+    });
+
+    const response = await profileRoute.DELETE(foreign);
+    expect(response.status).toBe(403);
+    expect(database.rows("quiz_profiles")).toHaveLength(1);
+  });
+
+  it("enforces the size limit on bytes actually received", async () => {
+    const huge = "x".repeat(200_000);
+    const response = await profileRoute.POST(
+      new NextRequest("http://localhost/api/profile", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://localhost", host: "localhost" },
+        body: JSON.stringify({ ...submission(keen()), alias: huge }),
+      }),
+    );
+    expect(response.status).toBe(413);
+  });
+
+  it("rejects a body that is not JSON", async () => {
+    const response = await profileRoute.POST(
+      new NextRequest("http://localhost/api/profile", {
+        method: "POST",
+        headers: { "content-type": "text/plain", origin: "http://localhost", host: "localhost" },
+        body: "hello",
+      }),
+    );
+    expect(response.status).toBe(415);
+  });
+
+  it("rejects contradictory answer details", async () => {
+    const response = await profileRoute.POST(
+      post("http://localhost/api/profile", {
+        ...submission({ [cardIds[0]]: { kind: "interest", interest: "yes", details: { hardLimit: true } } }),
+      }),
+    );
+    expect(response.status).toBe(400);
+    expect(database.rows("quiz_profiles")).toHaveLength(0);
+  });
+
+  it("rejects an answer to a question that was never asked", async () => {
+    const response = await profileRoute.POST(
+      post("http://localhost/api/profile", {
+        ...submission({
+          "media.watches": { kind: "choice", value: "no" },
+          "media.categories": { kind: "multi", values: ["romantic"] },
+        }),
+      }),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a submission for an old quiz version", async () => {
+    const response = await profileRoute.POST(
+      post("http://localhost/api/profile", { ...submission(keen()), quizVersion: "2026.2" }),
+    );
+    expect(response.status).toBe(400);
+  });
+});
+
+describe("rate limiting", () => {
+  it("returns 429 with Retry-After once the budget is spent", async () => {
+    await createProfile(keen());
+    let last: Response | null = null;
+
+    for (let attempt = 0; attempt < 12; attempt++) {
+      last = await compareRoute.POST(
+        post("http://localhost/api/compare", { desireCode: "DDNA-ABCD-EFGH-JKLM-NPQR" }),
+      );
+    }
+
+    expect(last?.status).toBe(429);
+    expect(Number(last?.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("fails closed for code lookups when the limiter is unavailable", async () => {
+    await createProfile(keen());
+    database.failure = "limiter down";
+
+    const response = await compareRoute.POST(
+      post("http://localhost/api/compare", { desireCode: "DDNA-ABCD-EFGH-JKLM-NPQR" }),
+    );
+    database.failure = null;
+
+    // Never an unlimited guessing window.
+    expect(response.status).toBe(503);
+  });
+});
+
 describe("POST /api/compare", () => {
   /** Creates a partner profile, then restores the caller's own cookie. */
-  async function withPartner(partnerAnswers: { questionId: string; value: string | string[] }[]) {
+  async function withPartner(partnerAnswers: Responses) {
     const owner = jar.get("ddna_owner");
     const partner = await createProfile(partnerAnswers);
     if (owner) jar.set("ddna_owner", owner);
@@ -213,15 +364,14 @@ describe("POST /api/compare", () => {
   });
 
   it("returns only derived data and never the partner's raw answers", async () => {
-    const answers = [
-      { questionId: questionIds[0], value: "like_it" },
-      { questionId: questionIds[1], value: "hard_limit" },
-    ];
-    await createProfile(answers);
-    const partner = await withPartner([
-      { questionId: questionIds[0], value: "like_it" },
-      { questionId: questionIds[1], value: "like_it" },
-    ]);
+    await createProfile({
+      [cardIds[0]]: { kind: "interest", interest: "yes" },
+      [cardIds[1]]: { kind: "interest", interest: "no", details: { hardLimit: true } },
+    });
+    const partner = await withPartner({
+      [cardIds[0]]: { kind: "interest", interest: "yes" },
+      [cardIds[1]]: { kind: "interest", interest: "yes" },
+    });
 
     const response = await compareRoute.POST(
       post("http://localhost/api/compare", { desireCode: partner.body.desireCode }),
@@ -231,26 +381,27 @@ describe("POST /api/compare", () => {
     const body = (await response.json()) as { comparison: Record<string, unknown> };
     const serialised = JSON.stringify(body);
     expect(body.comparison.answers).toBeUndefined();
+    expect(serialised).not.toContain("hardLimit");
     expect(serialised).not.toContain("questionId");
-    expect(serialised).not.toContain("hard_limit");
-    // Mutual-only is the default, so no difference may be disclosed.
+    // Mutual-only is the default, so no difference may be disclosed — not the
+    // entries, and not a count of them.
     expect(body.comparison.mode).toBe("mutual_only");
     expect(body.comparison.talkItThrough).toBeUndefined();
     expect(body.comparison.boundaryMismatches).toBeUndefined();
-    expect(body.comparison.sharedBoundaries).toBe(1);
+    expect(serialised).not.toContain("sharedBoundaries");
   });
 
   it("discloses differences only when both profiles opt into full comparison", async () => {
-    await createProfile([
-      { questionId: questionIds[0], value: "like_it" },
-      { questionId: questionIds[1], value: "hard_limit" },
-    ]);
+    await createProfile({
+      [cardIds[0]]: { kind: "interest", interest: "yes" },
+      [cardIds[1]]: { kind: "interest", interest: "no", details: { hardLimit: true } },
+    });
     await shareModeRoute.POST(post("http://localhost/api/profile/share-mode", { shareMode: "full_comparison" }));
 
-    const partner = await withPartner([
-      { questionId: questionIds[0], value: "like_it" },
-      { questionId: questionIds[1], value: "like_it" },
-    ]);
+    const partner = await withPartner({
+      [cardIds[0]]: { kind: "interest", interest: "yes" },
+      [cardIds[1]]: { kind: "interest", interest: "yes" },
+    });
 
     const oneSided = await compareRoute.POST(
       post("http://localhost/api/compare", { desireCode: partner.body.desireCode }),
@@ -274,8 +425,8 @@ describe("POST /api/compare", () => {
   });
 
   it("gives one generic answer for unknown, malformed, and expired codes", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
-    const partner = await withPartner([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
+    const partner = await withPartner(keen());
 
     const malformed = await compareRoute.POST(post("http://localhost/api/compare", { desireCode: "nope" }));
     const unknown = await compareRoute.POST(
@@ -301,7 +452,7 @@ describe("POST /api/compare", () => {
   });
 
   it("refuses to compare a profile with itself", async () => {
-    const own = await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
+    const own = await createProfile(keen());
     const response = await compareRoute.POST(
       post("http://localhost/api/compare", { desireCode: own.body.desireCode }),
     );
@@ -309,8 +460,8 @@ describe("POST /api/compare", () => {
   });
 
   it("accepts a partner code pasted without hyphens or in lower case", async () => {
-    await createProfile([{ questionId: questionIds[0], value: "like_it" }]);
-    const partner = await withPartner([{ questionId: questionIds[0], value: "like_it" }]);
+    await createProfile(keen());
+    const partner = await withPartner(keen());
     const messy = ` ${(partner.body.desireCode as string).replaceAll("-", "").toLowerCase()} `;
 
     const response = await compareRoute.POST(post("http://localhost/api/compare", { desireCode: messy }));

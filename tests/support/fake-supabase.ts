@@ -18,7 +18,7 @@ export class FakeSupabase {
   readonly tables = new Map<string, Row[]>();
   /** Set to force every operation to fail, simulating an unreachable database. */
   failure: string | null = null;
-  private sequence = 0;
+  sequence = 0;
 
   reset() {
     this.tables.clear();
@@ -33,6 +33,48 @@ export class FakeSupabase {
       this.tables.set(table, rows);
     }
     return rows;
+  }
+
+  /**
+   * Stands in for the `consume_rate_limit` Postgres function: counts the
+   * events in the window and records one, in a single step.
+   */
+  rpc(name: string, args: Record<string, unknown>) {
+    if (this.failure) {
+      return Promise.resolve({ data: null, error: { message: this.failure } });
+    }
+    if (name !== "consume_rate_limit") {
+      return Promise.resolve({ data: null, error: { message: `unknown function ${name}` } });
+    }
+
+    const keyHash = String(args.p_key_hash);
+    const action = String(args.p_action);
+    const limit = Number(args.p_limit);
+    const windowSeconds = Number(args.p_window_seconds);
+    const since = Date.now() - windowSeconds * 1000;
+
+    const rows = this.rows("rate_limit_events").filter(
+      (row) =>
+        row.key_hash === keyHash && row.action === action && new Date(String(row.created_at)).getTime() >= since,
+    );
+
+    if (rows.length >= limit) {
+      return Promise.resolve({
+        data: [{ allowed: false, used: rows.length, retry_after_seconds: windowSeconds }],
+        error: null,
+      });
+    }
+
+    this.rows("rate_limit_events").push({
+      id: ++this.sequence,
+      key_hash: keyHash,
+      action,
+      created_at: new Date().toISOString(),
+    });
+    return Promise.resolve({
+      data: [{ allowed: true, used: rows.length + 1, retry_after_seconds: 0 }],
+      error: null,
+    });
   }
 
   from(table: string) {

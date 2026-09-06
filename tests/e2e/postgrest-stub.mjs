@@ -53,6 +53,41 @@ const readBody = (req) =>
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
+
+  // Stands in for the consume_rate_limit function: count the window, record one.
+  if (url.pathname === "/rest/v1/rpc/consume_rate_limit") {
+    const args = await readBody(req);
+    const since = Date.now() - Number(args.p_window_seconds) * 1000;
+    const matching = tables.rate_limit_events.filter(
+      (row) =>
+        row.key_hash === args.p_key_hash &&
+        row.action === args.p_action &&
+        new Date(row.created_at).getTime() >= since,
+    );
+
+    const allowed = matching.length < Number(args.p_limit);
+    if (allowed) {
+      tables.rate_limit_events.push({
+        id: ++sequence,
+        key_hash: args.p_key_hash,
+        action: args.p_action,
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(
+      JSON.stringify([
+        {
+          allowed,
+          used: matching.length + (allowed ? 1 : 0),
+          retry_after_seconds: allowed ? 0 : Number(args.p_window_seconds),
+        },
+      ]),
+    );
+    return;
+  }
+
   const table = url.pathname.replace("/rest/v1/", "");
   const rows = tables[table];
 

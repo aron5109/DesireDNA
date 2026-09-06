@@ -149,6 +149,19 @@ export function env(): ServerConfig {
   return cached;
 }
 
+/**
+ * The key for a stored record's encryption-key version.
+ *
+ * Records keep the version they were written with. A record written under an
+ * older key is decrypted with that older key — read from
+ * `PROFILE_ENCRYPTION_KEY_V<n>` — rather than blindly with the current one.
+ */
+export function encryptionKeyForVersion(version: number): string | null {
+  const config = env();
+  if (version === config.PROFILE_ENCRYPTION_KEY_VERSION) return config.PROFILE_ENCRYPTION_KEY;
+  return resolve([`PROFILE_ENCRYPTION_KEY_V${version}`]) ?? null;
+}
+
 /** Test seam: clears the memoised configuration. */
 export function resetEnvCache(): void {
   cached = undefined;

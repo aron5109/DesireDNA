@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import { generateDesireCode, generateOwnerToken, normalizeDesireCode } from "@/lib/server/codes";
 import { decrypt, encrypt, hmac } from "@/lib/server/crypto";
-import { validateAnswers } from "@/lib/quiz/validation";
-import { questions } from "@/data/questions";
+import { validateResponses } from "@/lib/quiz/validation";
+import { CURRENT_QUIZ_VERSION, getCards } from "@/data/bank/registry";
 
 const key = randomBytes(32).toString("base64");
 
@@ -83,29 +83,31 @@ describe("lookup hashing", () => {
 });
 
 describe("answer validation", () => {
-  const question = questions[0];
+  const cards = getCards();
+  const interest = cards.find((card) => card.responseType === "interest")!;
+  const version = CURRENT_QUIZ_VERSION;
 
-  it("accepts a well-formed submission", () => {
-    expect(() => validateAnswers([{ questionId: question.id, value: "like_it" }])).not.toThrow();
-    expect(() => validateAnswers([{ questionId: question.id, value: "prefer_not_to_answer" }])).not.toThrow();
+  it("accepts well-formed responses", () => {
+    expect(() => validateResponses({ [interest.id]: { kind: "interest", interest: "yes" } }, version)).not.toThrow();
+    expect(() => validateResponses({ [interest.id]: { kind: "skipped" } }, version)).not.toThrow();
+    expect(() => validateResponses({ [interest.id]: { kind: "not_applicable" } }, version)).not.toThrow();
   });
 
-  it("rejects unknown IDs, duplicates, wrong shapes, and foreign values", () => {
-    expect(() => validateAnswers([{ questionId: "nope", value: "like_it" }])).toThrow();
-    expect(() =>
-      validateAnswers([
-        { questionId: question.id, value: "like_it" },
-        { questionId: question.id, value: "not_interested" },
-      ]),
-    ).toThrow();
-    expect(() => validateAnswers([{ questionId: question.id, value: ["like_it"] }])).toThrow();
-    expect(() => validateAnswers([{ questionId: question.id, value: "made_up_value" }])).toThrow();
+  it("rejects unknown ids and mismatched shapes", () => {
+    expect(() => validateResponses({ nope: { kind: "interest", interest: "yes" } }, version)).toThrow();
+    expect(() => validateResponses({ [interest.id]: { kind: "choice", value: "x" } }, version)).toThrow();
+    expect(() => validateResponses({ [interest.id]: { kind: "multi", values: ["x"] } }, version)).toThrow();
   });
 
-  it("rejects a multi-select answer that mixes a skip with real selections", () => {
-    expect(() =>
-      validateAnswers([{ questionId: "porn_categories", value: ["Romantic", "prefer_not_to_answer"] }]),
-    ).toThrow();
-    expect(() => validateAnswers([{ questionId: "porn_categories", value: ["Romantic", "Romantic"] }])).toThrow();
+  it("rejects values a card does not offer", () => {
+    const select = cards.find((card) => card.responseType === "single_select")!;
+    expect(() => validateResponses({ [select.id]: { kind: "choice", value: "not-an-option" } }, version)).toThrow();
+
+    const multi = cards.find((card) => card.responseType === "multi_select" && !card.showWhen)!;
+    expect(() => validateResponses({ [multi.id]: { kind: "multi", values: ["not-an-option"] } }, version)).toThrow();
+  });
+
+  it("rejects a submission built for a different quiz version", () => {
+    expect(() => validateResponses({}, "2026.2")).toThrow();
   });
 });

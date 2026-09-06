@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { SiteFooter, SiteHeader } from "@/components/SiteChrome";
+
 import { ResultView, type ProfileView } from "@/components/ResultExperience";
 import { ownerCookie } from "@/lib/server/cookies";
 import { logServerError } from "@/lib/server/logging";
@@ -39,7 +41,9 @@ export default async function Results() {
   }
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-8">
+    <>
+      <SiteHeader />
+      <main className="mx-auto max-w-3xl px-4 py-6">
       {profile ? (
         <ResultView profile={profile} />
       ) : unavailable ? (
@@ -66,5 +70,7 @@ export default async function Results() {
         </div>
       )}
     </main>
+      <SiteFooter />
+    </>
   );
 }
