@@ -95,7 +95,16 @@ export const limitByRequest = (req: NextRequest, action: string, limit: number, 
 export const limitByOwner = (owner: string, action: string, limit: number, windowSeconds: number) =>
   consume(`owner:${hmac(owner, env().OWNER_TOKEN_HMAC_KEY)}`, action, limit, windowSeconds);
 
-/** Documented budgets, in one place so the docs and the code cannot drift. */
+/**
+ * Documented budgets, in one place so the docs and the code cannot drift.
+ *
+ * Comparison already requires an owner cookie, so the per-profile budget is the
+ * real control: it cannot be reset by changing address, and it bounds what one
+ * person can do. The per-address budget is only a coarse flood guard, and it is
+ * deliberately generous — several people on one home or office connection share
+ * a single address, and a tight limit there punishes them for each other's use
+ * without stopping anyone determined.
+ */
 export const LIMITS = {
   /** Profile creation, per address. */
   create: { limit: 12, windowSeconds: 3600 },
@@ -103,10 +112,12 @@ export const LIMITS = {
   read: { limit: 60, windowSeconds: 600 },
   /** Deletions, per address. */
   remove: { limit: 10, windowSeconds: 600 },
-  /** Code attempts, per address. */
-  compareByIp: { limit: 10, windowSeconds: 600 },
-  /** Code attempts, per profile per day. */
-  compareByOwner: { limit: 30, windowSeconds: 86_400 },
+  /** Code attempts, per address — shared by everyone behind that address. */
+  compareByIp: { limit: 40, windowSeconds: 600 },
+  /** Code attempts, per profile per day. The meaningful guard. */
+  compareByOwner: { limit: 60, windowSeconds: 86_400 },
+  /** Wrong or unknown codes, per profile per day. Tighter than valid attempts. */
+  invalidCode: { limit: 20, windowSeconds: 86_400 },
   /** Code regeneration, per profile. */
   rotate: { limit: 5, windowSeconds: 3600 },
 } as const;

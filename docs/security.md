@@ -66,13 +66,25 @@ cannot both observe a count below the limit.
 | Create profile | 12 | 1 hour | request address |
 | Read result | 60 | 10 minutes | request address |
 | Delete | 10 | 10 minutes | request address |
-| Compare | 10 | 10 minutes | request address |
-| Compare | 30 | 24 hours | owner token |
+| Compare | 40 | 10 minutes | request address |
+| Compare | 60 | 24 hours | owner token |
+| Codes that did not match | 20 | 24 hours | owner token |
 | Replace code | 5 | 1 hour | owner token |
 
 The owner-scoped budgets key on the owner token, so changing network address
 does not reset them. The address itself is only ever a hint: `x-forwarded-for`
 can be prepended to by a caller, which is why the per-owner budget exists.
+
+Comparison requires an owner cookie, so the per-profile budget is the real
+control and the per-address one is only a coarse flood guard — deliberately
+generous, because several people behind one home or office connection share a
+single address and a tight limit there punishes them for each other's use
+without stopping anyone determined.
+
+Codes that do not resolve have their own tighter budget: guessing is the abuse
+worth bounding, not comparing with codes someone was actually given. That budget
+is enforced, not merely recorded — an exhausted guessing budget returns 429
+rather than another indistinguishable 404.
 
 Identity is a keyed HMAC that rotates daily; no raw address is stored.
 

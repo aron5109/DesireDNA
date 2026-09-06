@@ -150,8 +150,13 @@ neither is presented as a compatibility score. See
 
 Database-backed, keyed on a daily-rotating HMAC of the request identity — raw
 IP addresses are never stored. Current budgets: 12 profile creations per hour,
-60 result reads and 10 deletions per 10 minutes, 10 comparison attempts per 10
-minutes, and 30 comparisons per profile per day. If the rate-limit table itself
+60 result reads and 10 deletions per 10 minutes, 40 comparison attempts per 10
+minutes per address, 60 comparisons per profile per day, and 20 codes that did
+not match per profile per day.
+
+The per-address budget is generous on purpose: comparison already requires a
+completed quiz, so the per-profile budget is the real control, and a tight
+address limit only punishes people who share a connection. If the rate-limit table itself
 is unreachable the request is allowed and the failure is logged: a broken
 counter must not be the reason someone loses the result they just produced.
 

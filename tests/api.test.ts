@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeSupabase } from "./support/fake-supabase";
+import { LIMITS } from "@/lib/server/rate-limit";
 
 const database = new FakeSupabase();
 
@@ -360,18 +361,64 @@ describe("profile lifecycle", () => {
 });
 
 describe("rate limiting", () => {
-  it("returns 429 with Retry-After once the budget is spent", async () => {
+  /** Creates a second profile and restores the caller's own cookie. */
+  async function createProfileKeepingOwner() {
+    const owner = jar.get("ddna_owner");
+    const other = await createProfile(keen());
+    if (owner) jar.set("ddna_owner", owner);
+    return other.body.desireCode as string;
+  }
+
+  it("returns 429 with Retry-After and a wait time once the budget is spent", async () => {
     await createProfile(keen());
     let last: Response | null = null;
 
-    for (let attempt = 0; attempt < 12; attempt++) {
+    for (let attempt = 0; attempt < 25; attempt++) {
       last = await compareRoute.POST(
         post("http://localhost/api/compare", { desireCode: "DDNA-ABCD-EFGH-JKLM-NPQR" }),
       );
+      if (last.status === 429) break;
     }
 
     expect(last?.status).toBe(429);
     expect(Number(last?.headers.get("retry-after"))).toBeGreaterThan(0);
+    // Says how long, rather than an open-ended "later".
+    expect(((await last?.json()) as { error: string }).error).toMatch(/in about \d+ minute/);
+  });
+
+  it("cuts off code guessing sooner than ordinary comparisons", async () => {
+    await createProfile(keen());
+
+    let limitedAt = 0;
+    for (let attempt = 1; attempt <= 40; attempt++) {
+      const response = await compareRoute.POST(
+        post("http://localhost/api/compare", { desireCode: "DDNA-ABCD-EFGH-JKLM-NPQR" }),
+      );
+      if (response.status === 429) {
+        limitedAt = attempt;
+        break;
+      }
+      expect(response.status).toBe(404);
+    }
+
+    // Enforced, not merely recorded, and tighter than the 40-per-window
+    // budget for comparisons against codes that do resolve.
+    expect(limitedAt).toBeGreaterThan(0);
+    expect(limitedAt).toBeLessThanOrEqual(LIMITS.invalidCode.limit + 1);
+  });
+
+  it("allows a realistic number of attempts before limiting", async () => {
+    await createProfile(keen());
+    const partner = await createProfileKeepingOwner();
+
+    // Several people can share one address, so a handful of attempts each must
+    // not exhaust the budget.
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const response = await compareRoute.POST(
+        post("http://localhost/api/compare", { desireCode: partner }),
+      );
+      expect(response.status, `attempt ${attempt + 1} was limited`).not.toBe(429);
+    }
   });
 
   it("says a missing limiter needs installing, not retrying", async () => {

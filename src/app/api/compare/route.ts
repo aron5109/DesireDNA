@@ -21,6 +21,26 @@ const noStore = { "Cache-Control": "no-store" };
  */
 const NOT_FOUND = "This DesireCode was not found or has expired.";
 
+/**
+ * Records a failed code attempt and reports whether the guessing budget is
+ * spent. Wrong codes are the abuse signal, so they are bounded more tightly
+ * than comparisons with codes someone was actually given.
+ */
+async function noteFailedAttempt(owner: string) {
+  return limitByOwner(owner, "invalid_code", LIMITS.invalidCode.limit, LIMITS.invalidCode.windowSeconds);
+}
+
+const tooManyGuesses = (retryAfterSeconds: number) => {
+  const minutes = Math.max(1, Math.ceil(retryAfterSeconds / 60));
+  return NextResponse.json(
+    {
+      error: `Too many codes that did not match. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      retryAfterSeconds,
+    },
+    { status: 429, headers: { ...noStore, "Retry-After": String(retryAfterSeconds) } },
+  );
+};
+
 const bodySchema = z
   .object({ desireCode: z.string().max(40), turnstileToken: z.string().max(2048).optional() })
   .strict();
@@ -64,8 +84,12 @@ export async function POST(req: NextRequest) {
         );
       }
       if (!decision.allowed) {
+        const minutes = Math.max(1, Math.ceil(decision.retryAfterSeconds / 60));
         return NextResponse.json(
-          { error: "Too many attempts. Try again later.", retryAfterSeconds: decision.retryAfterSeconds },
+          {
+            error: `Too many comparison attempts. Try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+            retryAfterSeconds: decision.retryAfterSeconds,
+          },
           { status: 429, headers: { ...noStore, "Retry-After": String(decision.retryAfterSeconds) } },
         );
       }
@@ -83,7 +107,8 @@ export async function POST(req: NextRequest) {
 
     const code = normalizeDesireCode(desireCode);
     if (!code) {
-      await limitByOwner(owner, "invalid_code", LIMITS.compareByOwner.limit, LIMITS.compareByOwner.windowSeconds);
+      const guesses = await noteFailedAttempt(owner);
+      if (!guesses.allowed) return tooManyGuesses(guesses.retryAfterSeconds);
       return NextResponse.json({ error: NOT_FOUND }, { status: 404, headers: noStore });
     }
 
@@ -95,7 +120,8 @@ export async function POST(req: NextRequest) {
       );
     }
     if (!partner || self.row.id === partner.row.id) {
-      await limitByOwner(owner, "invalid_code", LIMITS.compareByOwner.limit, LIMITS.compareByOwner.windowSeconds);
+      const guesses = await noteFailedAttempt(owner);
+      if (!guesses.allowed) return tooManyGuesses(guesses.retryAfterSeconds);
       return NextResponse.json({ error: NOT_FOUND }, { status: 404, headers: noStore });
     }
 
