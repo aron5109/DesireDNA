@@ -1,51 +1,100 @@
 import "server-only";
 import type { NextRequest } from "next/server";
+
 import { db } from "./supabase";
 import { env } from "./env";
 import { hmac } from "./crypto";
 import { ConfigurationError, logServerError } from "./logging";
 
+export interface RateLimitDecision {
+  allowed: boolean;
+  retryAfterSeconds: number;
+  /** True when the limiter itself could not be consulted. */
+  degraded: boolean;
+}
+
 /**
  * Database-backed rate limiting.
  *
- * The caller's IP is never stored: it is folded into a keyed HMAC together
- * with the current date, so the identity rotates daily and the stored value is
- * not reversible.
- *
- * A rate-limit table that is unreachable must not be the reason a consenting
- * adult loses the result they just spent ten minutes producing, so storage
- * failures are logged and allowed through. Configuration errors still throw:
- * those mean the deployment itself is broken and the caller reports that.
+ * Identity is a keyed HMAC that rotates daily, so no raw IP is ever stored.
+ * Counting and recording happen inside one Postgres function under an advisory
+ * lock, so two concurrent requests cannot both read a count below the limit.
  */
-export async function rateLimit(
-  req: NextRequest,
+
+/**
+ * The client address. Behind Vercel the left-most `x-forwarded-for` entry is
+ * set by the platform, but a caller can prepend entries, so it is only ever an
+ * identity hint. Owner-scoped budgets below do not depend on it at all.
+ */
+function requestIdentity(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  const real = req.headers.get("x-real-ip")?.trim();
+  return forwarded || real || "unknown";
+}
+
+function keyFor(scope: string): string {
+  const day = new Date().toISOString().slice(0, 10);
+  return hmac(`${day}:${scope}`, env().RATE_LIMIT_HMAC_KEY);
+}
+
+async function consume(
+  scope: string,
   action: string,
   limit: number,
-  minutes: number,
-  owner = "",
-): Promise<boolean> {
-  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
-  const day = new Date().toISOString().slice(0, 10);
-  const key = hmac(`${day}:${ip}:${owner}`, env().RATE_LIMIT_HMAC_KEY);
-  const since = new Date(Date.now() - minutes * 60_000).toISOString();
-
+  windowSeconds: number,
+): Promise<RateLimitDecision> {
   try {
-    const client = db();
-    const { count, error } = await client
-      .from("rate_limit_events")
-      .select("id", { count: "exact", head: true })
-      .eq("key_hash", key)
-      .eq("action", action)
-      .gte("created_at", since);
+    const { data, error } = await db().rpc("consume_rate_limit", {
+      p_key_hash: keyFor(scope),
+      p_action: action,
+      p_limit: limit,
+      p_window_seconds: windowSeconds,
+    });
     if (error) throw error;
-    if ((count ?? 0) >= limit) return false;
 
-    const { error: insertError } = await client.from("rate_limit_events").insert({ key_hash: key, action });
-    if (insertError) throw insertError;
-    return true;
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row.allowed !== "boolean") throw new Error("Unexpected limiter response");
+
+    return {
+      allowed: row.allowed,
+      retryAfterSeconds: Number(row.retry_after_seconds ?? windowSeconds),
+      degraded: false,
+    };
   } catch (error) {
     if (error instanceof ConfigurationError) throw error;
     logServerError(`rate-limit:${action}`, error);
-    return true;
+    return { allowed: false, retryAfterSeconds: 30, degraded: true };
   }
 }
+
+/**
+ * IP-scoped limit. Used for operations where an unknown caller is the risk.
+ * A limiter failure returns `degraded`, and each caller decides: code lookups
+ * fail closed, while saving a completed quiz is allowed through so nobody
+ * loses answers to an outage.
+ */
+export const limitByRequest = (req: NextRequest, action: string, limit: number, windowSeconds: number) =>
+  consume(`ip:${requestIdentity(req)}`, action, limit, windowSeconds);
+
+/**
+ * Owner-scoped limit, keyed on the owner token rather than the network path,
+ * so the budget cannot be reset by changing address.
+ */
+export const limitByOwner = (owner: string, action: string, limit: number, windowSeconds: number) =>
+  consume(`owner:${hmac(owner, env().OWNER_TOKEN_HMAC_KEY)}`, action, limit, windowSeconds);
+
+/** Documented budgets, in one place so the docs and the code cannot drift. */
+export const LIMITS = {
+  /** Profile creation, per address. */
+  create: { limit: 12, windowSeconds: 3600 },
+  /** Result reads, per address. */
+  read: { limit: 60, windowSeconds: 600 },
+  /** Deletions, per address. */
+  remove: { limit: 10, windowSeconds: 600 },
+  /** Code attempts, per address. */
+  compareByIp: { limit: 10, windowSeconds: 600 },
+  /** Code attempts, per profile per day. */
+  compareByOwner: { limit: 30, windowSeconds: 86_400 },
+  /** Code regeneration, per profile. */
+  rotate: { limit: 5, windowSeconds: 3600 },
+} as const;

@@ -38,6 +38,28 @@ bank to one question per category. That flag is ignored whenever
 
 Apply `supabase/migrations/202609040001_initial_schema.sql` in a new Supabase project (CLI `supabase db push`, or the SQL editor), then configure the environment. The migration enables RLS, revokes client roles, and has no public policies. Only the service-role server client is used.
 
+## Checking a deployment
+
+`GET /api/health` reports whether the server has everything it needs:
+
+```bash
+curl https://your-deployment.example.com/api/health
+```
+
+A healthy deployment returns `{"status":"ok"}`. Otherwise it returns 503 and
+names each variable that is missing or unusable — names and reasons only, never
+a value. The quiz shows the same list if profile creation fails, so a
+misconfigured deployment says what to fix instead of failing opaquely.
+
+**Environment variables only take effect on a new deployment.** After adding
+them in Vercel, redeploy; the running deployment keeps the values it was built
+with.
+
+Supabase variables are also accepted under any integration prefix
+(`<storename>_SUPABASE_URL`, `<storename>_SUPABASE_SERVICE_ROLE_KEY`) and under
+the newer `SUPABASE_SECRET_KEY` name, so the Vercel/Supabase integration works
+whatever the store is called. A plain `SUPABASE_URL` always wins.
+
 ## Environment
 
 | Variable | Purpose / format |
@@ -64,6 +86,26 @@ openssl rand -base64 48 # CRON_SECRET
 
 The encryption key must decode to exactly 32 bytes. Rotation requires retaining old keys by version while records remain, deploying multi-key decryption, re-encrypting active records, and only then retiring the old key. The initial implementation deliberately fails closed for unknown configuration and supports one active key.
 
+## The quiz
+
+One card at a time, with three actions: **Not for me**, **Curious**, and
+**Into it**. Swipe left or right, or tap — every action works without gestures,
+and swiping can be turned off in settings. "Curious" is a centre tap rather than
+an upward swipe, so it cannot fight with scrolling.
+
+An optional details sheet records what a swipe deliberately does not: whether
+someone has tried something, how it went, whether it is real intent or fantasy,
+and whether it is a hard limit. None of it is ever assumed — a swipe records
+interest and nothing else.
+
+There is no way to skip a whole category. Individual cards can be skipped with
+one tap, reversibly, with no acknowledgement checkbox: a skip is excluded from
+scoring and comparison entirely and is never read as a no.
+
+The bank is 78 cards, 74 on the default path — see
+[docs/question-bank-audit.md](docs/question-bank-audit.md) for what was merged
+and why.
+
 ## Display aliases
 
 When someone begins the quiz the browser assigns a random, non-identifying
@@ -89,6 +131,20 @@ The server creates a 256-bit owner token in an HttpOnly, Secure-in-production, S
 3. `vercel.json` schedules `GET /api/maintenance/purge` daily. Vercel sends `Authorization: Bearer $CRON_SECRET` when that project variable is configured; an external scheduler must send the same header.
 4. **Turnstile is not ready to enable.** `/api/compare` verifies a token server-side whenever `TURNSTILE_SECRET_KEY` is set, but the browser widget is not rendered yet and the CSP does not allow Cloudflare's script. Setting the secret today makes every comparison fail with "Verification failed." Leave both keys unset until the widget, the CSP entry, and the token round trip are implemented together.
 5. Deploy a preview, run mobile/keyboard checks, confirm CSP and no-store headers, test expiry/deletion, and inspect logs for sensitive-data absence.
+
+## Result and comparison scoring
+
+Interest maps to 0 (Not for me), 50 (Curious), 100 (Into it). Optional
+experience never raises adventurousness. Skipped, not-applicable, and unanswered
+cards are excluded rather than counted as zero, and a profile with fewer than
+five scored answers reports "not enough answers" instead of inventing a
+personality.
+
+Comparison is role-aware: giving pairs with receiving, watching with being
+watched. Shared interest (what you both want) is reported separately from
+preference similarity (how alike your answers are, including shared nos), and
+neither is presented as a compatibility score. See
+[docs/security.md](docs/security.md) for the formulas and thresholds.
 
 ## Rate limits
 

@@ -61,18 +61,27 @@ export interface QuizAnswer {
 export type ShareMode = "mutual_only" | "full_comparison";
 
 export interface QuizResult {
-  adventureIndex: number;
-  communicationScore: number;
+  /** Null when there were not enough scored answers to characterise anyone. */
+  adventureIndex: number | null;
+  communicationScore: number | null;
   categoryScores: Record<string, number>;
   categoryLabels: Record<string, string>;
   answered: number;
   skipped: number;
+  notApplicable: number;
   hardLimits: number;
+  /** How many answers actually fed the index. */
+  scoredCount: number;
+  /** How many cards were shown, after conditional cards were resolved. */
+  asked: number;
   personality: { name: string; emoji: string; description: string };
 }
 
 export interface ProfilePayload {
-  answers: QuizAnswer[];
+  /** v2 shape. Present only on profiles created before 2026.3. */
+  answers?: QuizAnswer[];
+  /** v3 shape: stable card id to versioned response. */
+  responses?: Record<string, import("./answer").QuestionResponse>;
   result: QuizResult;
   desireCode: string;
   /** Non-identifying display handle assigned when the quiz was started. */

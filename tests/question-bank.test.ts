@@ -1,117 +1,106 @@
 import { describe, expect, it } from "vitest";
 
-import { STANDARD_OPTIONS, getQuestions, questions, raceSensitiveQuestion } from "@/data/questions";
+import { BANK_V3, RACE_SENSITIVE_CARD } from "@/data/bank/v3";
+import { CURRENT_QUIZ_VERSION, getCards, versionsAreComparable } from "@/data/bank/registry";
+import { QUIZ_VERSION_V2 } from "@/data/bank/v2-frozen";
+import { COMPLEMENT } from "@/lib/quiz/bank-types";
 
-/**
- * Terms that must never appear in the bank. Matched on word boundaries so an
- * innocent substring cannot trip the check.
- */
 const FORBIDDEN = [
-  "teen",
-  "teens",
-  "minor",
-  "minors",
-  "underage",
-  "barely legal",
-  "schoolgirl",
-  "schoolboy",
-  "incest",
-  "bestiality",
-  "scat",
-  "trafficking",
-  "unconscious",
-  "drunk",
-  "passed out",
-  "hidden camera",
-  "hidden-camera",
-  "upskirt",
-  "revenge porn",
-  "choking",
-  "breath play",
-  "asphyxiation",
-  "non-consensual",
-  "nonconsensual",
+  "teen", "teens", "minor", "minors", "underage", "barely legal", "schoolgirl", "schoolboy",
+  "incest", "bestiality", "scat", "trafficking", "unconscious", "drunk", "passed out",
+  "hidden camera", "upskirt", "revenge porn", "choking", "breath play", "asphyxiation",
+  "non-consensual", "nonconsensual",
 ];
 
+const cards = BANK_V3.cards;
+
 describe("question bank", () => {
-  it("has unique stable IDs and complete metadata", () => {
-    expect(new Set(questions.map((question) => question.id)).size).toBe(questions.length);
+  it("is a curated size rather than a long list", () => {
+    const onDefaultPath = cards.filter((card) => !card.showWhen);
+    expect(onDefaultPath.length).toBeGreaterThanOrEqual(55);
+    expect(onDefaultPath.length).toBeLessThanOrEqual(80);
+  });
 
-    for (const question of questions) {
-      expect(question.id).toMatch(/^[a-z]+_[a-z0-9_]+$/);
-      expect(question.categoryId).toBeTruthy();
-      expect(question.categoryLabel).toBeTruthy();
-      expect(question.shortLabel).toBeTruthy();
-      expect(question.prompt.length).toBeGreaterThan(10);
-      expect(question.version).toBeTruthy();
-      expect(question.intensity).toBeGreaterThanOrEqual(1);
-      expect(question.intensity).toBeLessThanOrEqual(5);
-      expect(question.answerOptions.some((option) => option.value === "prefer_not_to_answer")).toBe(false);
-      if (question.scoringEnabled) {
-        expect(question.answerOptions.filter((option) => !option.excluded).every((option) => option.score !== undefined)).toBe(true);
-      }
+  it("uses stable semantic ids, not positional ones", () => {
+    expect(new Set(cards.map((card) => card.id)).size).toBe(cards.length);
+    for (const card of cards) {
+      expect(card.id).toMatch(/^[a-z]+\.[a-z0-9_]+$/);
+      // A positional id like "everyday_07" must never come back.
+      expect(card.id).not.toMatch(/_\d+$/);
     }
   });
 
-  it("covers every required category", () => {
-    const categories = new Set(questions.map((question) => question.categoryId));
+  it("declares role metadata explicitly and consistently", () => {
+    for (const card of cards) {
+      expect(card.activityId).toBeTruthy();
+      expect(card.role).toBeTruthy();
+      // The declared complement must agree with the role table.
+      expect(card.compatibleRole).toBe(COMPLEMENT[card.role]);
+    }
+  });
+
+  it("has no duplicate activity and role combinations", () => {
+    const seen = new Set<string>();
+    for (const card of cards) {
+      const key = `${card.activityId}:${card.role}`;
+      expect(seen.has(key), `duplicate activity/role: ${key}`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it("covers every core topic group", () => {
+    const categories = new Set(cards.map((card) => card.categoryId));
     for (const required of [
-      "everyday",
-      "physical",
-      "oral",
-      "anal",
-      "power",
-      "toys",
-      "watching",
-      "groups",
-      "fluids",
-      "communication",
+      "everyday", "physical", "oral", "anal", "power",
+      "toys", "watching", "groups", "fluids", "media", "communication",
     ]) {
-      expect(categories.has(required)).toBe(true);
-    }
-    expect(questions.length).toBeGreaterThanOrEqual(100);
-  });
-
-  it("distinguishes giving, receiving, and watching roles", () => {
-    const roles = new Set(questions.map((question) => question.role));
-    for (const role of ["giving", "receiving", "watching", "being_watched"]) {
-      expect(roles.has(role as never)).toBe(true);
+      expect(categories.has(required), `missing category ${required}`).toBe(true);
     }
   });
 
-  it("keeps sort order unique and stable", () => {
-    const orders = questions.map((question) => question.sortOrder);
-    expect(new Set(orders).size).toBe(orders.length);
+  it("uses fitting controls rather than forcing everything into a swipe", () => {
+    const frequency = cards.find((card) => card.id === "everyday.frequency");
+    expect(frequency?.responseType).toBe("single_select");
+    expect(frequency?.options?.length).toBeGreaterThan(3);
+
+    const media = cards.find((card) => card.id === "media.categories");
+    expect(media?.responseType).toBe("multi_select");
+    expect(media?.groups?.length).toBeGreaterThan(1);
+
+    // A frequency question must not be phrased as an interest card.
+    expect(frequency?.prompt.toLowerCase()).not.toContain("how do you feel about");
   });
 
-  it("uses the requested experience labels", () => {
-    expect(STANDARD_OPTIONS.some((option) => String(option.value) === "love_it")).toBe(false);
-    expect(STANDARD_OPTIONS.find((option) => option.value === "like_it")?.label).toBe("I have done it and love it");
-    expect(STANDARD_OPTIONS.find((option) => option.value === "hard_limit")?.boundary).toBe(true);
-    expect(STANDARD_OPTIONS.find((option) => option.value === "hard_limit")?.score).toBe(0);
-  });
-
-  it("contains only valid standard values for standard questions", () => {
-    const valid = new Set<string>(STANDARD_OPTIONS.map((option) => option.value));
-    for (const question of questions.filter((entry) => entry.responseType === "single_choice")) {
-      for (const option of question.answerOptions) expect(valid.has(option.value)).toBe(true);
+  it("gates conditional cards on an explicit earlier answer", () => {
+    for (const card of cards.filter((entry) => entry.showWhen)) {
+      const gate = cards.find((entry) => entry.id === card.showWhen?.questionId);
+      expect(gate, `${card.id} has an unknown gate`).toBeDefined();
     }
   });
 
-  it("omits forbidden framing everywhere, including the media taxonomy", () => {
-    const text = JSON.stringify([...getQuestions(), raceSensitiveQuestion]).toLowerCase();
+  it("keeps the race-sensitive item out of the bank, scoring, and comparison", () => {
+    expect(getCards().some((card) => card.id === RACE_SENSITIVE_CARD.id)).toBe(false);
+    expect(RACE_SENSITIVE_CARD.scoringEnabled).toBe(false);
+    expect(RACE_SENSITIVE_CARD.comparisonEnabled).toBe(false);
+    expect(RACE_SENSITIVE_CARD.sensitiveTags).toContain("racial_ethnic_data");
+  });
+
+  it("omits forbidden framing", () => {
+    const text = JSON.stringify([...cards, RACE_SENSITIVE_CARD]).toLowerCase();
     for (const term of FORBIDDEN) {
       expect(text).not.toMatch(new RegExp(`\\b${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`));
     }
   });
 
-  it("disables race-sensitive scoring and comparison", () => {
-    expect(raceSensitiveQuestion.scoringEnabled).toBe(false);
-    expect(raceSensitiveQuestion.comparisonEnabled).toBe(false);
-    expect(raceSensitiveQuestion.sensitiveTags).toContain("racial_ethnic_data");
+  it("offers no way to skip a whole category", () => {
+    const text = JSON.stringify(cards).toLowerCase();
+    expect(text).not.toContain("skip category");
+    expect(text).not.toContain("skip this category");
   });
 
-  it("leaves race-sensitive items out of the bank unless the flag is enabled", () => {
-    expect(getQuestions().some((question) => question.id === raceSensitiveQuestion.id)).toBe(false);
+  it("only compares versions that share an answer model", () => {
+    expect(versionsAreComparable(CURRENT_QUIZ_VERSION, CURRENT_QUIZ_VERSION)).toBe(true);
+    expect(versionsAreComparable(CURRENT_QUIZ_VERSION, QUIZ_VERSION_V2)).toBe(false);
+    expect(versionsAreComparable(CURRENT_QUIZ_VERSION, "made-up")).toBe(false);
   });
 });

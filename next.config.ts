@@ -7,10 +7,26 @@ const isDevelopment = process.env.NODE_ENV !== "production";
  * the policy is relaxed for `next dev` only. Without this the dev server
  * serves a page that never hydrates. Production keeps the strict policy.
  */
-const scriptSrc = ["'self'", "'unsafe-inline'", isDevelopment ? "'unsafe-eval'" : null]
+/**
+ * Turnstile is only allowed through the policy when it is actually configured,
+ * so a deployment without it keeps the tighter policy.
+ */
+const turnstileEnabled = Boolean(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY?.trim());
+const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
+
+const scriptSrc = [
+  "'self'",
+  "'unsafe-inline'",
+  isDevelopment ? "'unsafe-eval'" : null,
+  turnstileEnabled ? TURNSTILE_ORIGIN : null,
+]
   .filter(Boolean)
   .join(" ");
-const connectSrc = ["'self'", isDevelopment ? "ws: http://127.0.0.1:* http://localhost:*" : null]
+const connectSrc = [
+  "'self'",
+  turnstileEnabled ? TURNSTILE_ORIGIN : null,
+  isDevelopment ? "ws: http://127.0.0.1:* http://localhost:*" : null,
+]
   .filter(Boolean)
   .join(" ");
 
@@ -22,6 +38,7 @@ const contentSecurityPolicy = [
   `connect-src ${connectSrc}`,
   "font-src 'self' data:",
   "object-src 'none'",
+  `frame-src ${turnstileEnabled ? TURNSTILE_ORIGIN : "'none'"}`,
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -46,6 +63,8 @@ const privateHeaders = [
 ];
 
 const config: NextConfig = {
+  // The floating dev badge sits over the quiz's bottom controls.
+  devIndicators: false,
   // The dev server is reached over 127.0.0.1 during end-to-end runs.
   allowedDevOrigins: ["127.0.0.1", "localhost"],
   async headers() {

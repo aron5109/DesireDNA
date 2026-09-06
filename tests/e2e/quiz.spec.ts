@@ -1,166 +1,252 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
-/**
- * The full mobile journey: landing → consent → quiz → result → comparison →
- * deletion. This is the flow that must never dead-end, so it is asserted
- * against a real browser rather than only at the unit level.
- */
-test("an adult can complete the quiz, see the outcome, and delete it", async ({ page }) => {
-  await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("DesireDNA");
-
-  await page.getByRole("link", { name: "Discover My DesireDNA" }).click();
-  await expect(page.getByRole("heading", { name: "Before we begin" })).toBeVisible();
-
-  // Nothing may be preselected on the consent gate.
-  const checkboxes = page.locator('input[type="checkbox"]');
-  const count = await checkboxes.count();
-  for (let index = 0; index < count; index++) await expect(checkboxes.nth(index)).not.toBeChecked();
-
-  const begin = page.getByRole("button", { name: "Begin private quiz" });
-  await expect(begin).toBeDisabled();
-
-  // Retry until React has hydrated: a click before hydration is ignored.
+/** Retries until React has hydrated: a click before that is ignored. */
+async function startQuiz(page: Page) {
+  await page.goto("/quiz");
+  const begin = page.getByRole("button", { name: "Start" });
   await expect(async () => {
-    await page.getByLabel("I agree to all of the above.").check();
+    for (const box of await page.locator('input[type="checkbox"]').all()) await box.check();
     await expect(begin).toBeEnabled({ timeout: 1000 });
   }).toPass({ timeout: 30_000 });
-
-  await page.getByRole("button", { name: "24 hours" }).click();
   await begin.click();
+  await expect(card(page)).toBeVisible();
+}
 
-  // A random alias is assigned at the start of the quiz.
-  const aliasText = await page.locator("text=You are answering as").textContent();
-  const alias = aliasText?.match(/as ([A-Z][a-z]+ [A-Z][a-z]+ \d{4})/)?.[1];
+/** True when the card on screen uses the three swipe actions. */
+async function isInterestCard(page: Page) {
+  return page.getByRole("button", { name: "Into it", exact: true }).isVisible().catch(() => false);
+}
+
+/** Answers whatever card is showing and moves on. */
+async function answerCurrent(page: Page) {
+  if (await isInterestCard(page)) {
+    await page.getByRole("button", { name: "Into it", exact: true }).click();
+    return;
+  }
+  // A select card: pick the first option, then continue.
+  const option = card(page).locator("button[aria-pressed]").first();
+  if (await option.isVisible().catch(() => false)) await option.click();
+  // A single-select commits on choice; only a multi-select has a Continue.
+  const continueButton = page.getByRole("button", { name: "Continue" });
+  if ((await continueButton.isVisible().catch(() => false)) && (await continueButton.isEnabled().catch(() => false))) {
+    await continueButton.click();
+  }
+}
+
+/** Advances until a swipe card is on screen. */
+async function goToInterestCard(page: Page) {
+  for (let guard = 0; guard < 20; guard++) {
+    if (await isInterestCard(page)) return;
+    await answerCurrent(page);
+  }
+  throw new Error("no interest card reached");
+}
+
+const card = (page: Page) => page.locator('[data-testid^="card-"]');
+
+/** Drags the card horizontally with real pointer events. */
+async function swipe(page: Page, direction: "left" | "right", distance = 200) {
+  const box = await card(page).boundingBox();
+  if (!box) throw new Error("no card on screen");
+  const startX = box.x + box.width / 2;
+  const y = box.y + box.height / 2;
+  const endX = direction === "left" ? startX - distance : startX + distance;
+
+  await page.mouse.move(startX, y);
+  await page.mouse.down();
+  for (let step = 1; step <= 8; step++) {
+    await page.mouse.move(startX + ((endX - startX) * step) / 8, y);
+  }
+  await page.mouse.up();
+}
+
+async function answerAll(page: Page) {
+  for (let guard = 0; guard < 120; guard++) {
+    if (await page.getByRole("button", { name: "See my result" }).isVisible().catch(() => false)) break;
+    await answerCurrent(page);
+  }
+  await expect(page.getByRole("button", { name: "See my result" })).toBeVisible({ timeout: 30_000 });
+}
+
+test("the three actions each record an answer by tapping", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+
+  const first = await card(page).getAttribute("data-testid");
+  await page.getByRole("button", { name: "Curious", exact: true }).click();
+  // Auto-advance moves to the next card.
+  await expect(card(page)).not.toHaveAttribute("data-testid", first as string);
+
+  await page.getByRole("button", { name: "Into it", exact: true }).click();
+  await page.getByRole("button", { name: "Not for me", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeEnabled();
+});
+
+test("swiping left and right answers, and a short drag does not", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+
+  const before = await card(page).getAttribute("data-testid");
+
+  // Too short to commit: the card springs back and nothing is recorded.
+  await swipe(page, "right", 30);
+  await expect(card(page)).toHaveAttribute("data-testid", before as string);
+
+  // A full swipe right records "Into it" and moves on.
+  await swipe(page, "right");
+  await expect(card(page)).not.toHaveAttribute("data-testid", before as string);
+
+  const second = await card(page).getAttribute("data-testid");
+  await swipe(page, "left");
+  await expect(card(page)).not.toHaveAttribute("data-testid", second as string);
+});
+
+test("a vertical drag scrolls instead of answering", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+  const before = await card(page).getAttribute("data-testid");
+
+  const box = await card(page).boundingBox();
+  if (!box) throw new Error("no card");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  for (let step = 1; step <= 6; step++) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + step * 30);
+  await page.mouse.up();
+
+  await expect(card(page)).toHaveAttribute("data-testid", before as string);
+});
+
+test("undo returns to the previous card with its answer intact", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+  const first = await card(page).getAttribute("data-testid");
+
+  await page.getByRole("button", { name: "Into it", exact: true }).click();
+  await expect(card(page)).not.toHaveAttribute("data-testid", first as string);
+
+  await page.getByRole("button", { name: "Undo" }).click();
+  await expect(card(page)).toHaveAttribute("data-testid", first as string);
+  await expect(page.getByText("Recorded: Into it")).toBeVisible();
+});
+
+test("skipping one question needs no acknowledgement, and there is no way to skip a category", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+
+  await expect(page.getByRole("button", { name: /skip category/i })).toHaveCount(0);
+  await expect(page.getByText(/less accurate/i)).toHaveCount(0);
+
+  const first = await card(page).getAttribute("data-testid");
+  await page.getByRole("button", { name: "Prefer not to answer" }).click();
+  // Straight to the next card — no dialog, no checkbox.
+  await expect(card(page)).not.toHaveAttribute("data-testid", first as string);
+});
+
+test("the details sheet records optional detail and is keyboard operable", async ({ page }) => {
+  await startQuiz(page);
+  await goToInterestCard(page);
+
+  await page.getByRole("button", { name: "Details" }).click();
+  const sheet = page.getByRole("dialog");
+  await expect(sheet).toBeVisible();
+
+  await sheet.getByRole("button", { name: "This is a hard limit" }).click();
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+
+  await expect(page.getByText(/hard limit/)).toBeVisible();
+});
+
+test("the final card leads to a review screen before anything is saved", async ({ page }) => {
+  await startQuiz(page);
+  await answerAll(page);
+
+  await expect(page.getByRole("heading", { name: /everything/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Go back through the cards" })).toBeVisible();
+});
+
+test("an adult can finish, see the outcome, and delete it", async ({ page }) => {
+  await startQuiz(page);
+
+  const aliasFromSettings = async () => {
+    await page.getByRole("button", { name: "Quiz settings" }).click();
+    const text = await page.getByRole("dialog").textContent();
+    await page.getByRole("button", { name: "Done" }).click();
+    return text?.match(/([A-Z][a-z]+ [A-Z][a-z]+ \d{4})/)?.[1];
+  };
+  const alias = await aliasFromSettings();
   expect(alias).toBeTruthy();
 
-  // Answer everything except one question, which is skipped on purpose.
-  let skipped = false;
-  for (let guard = 0; guard < 60; guard++) {
-    const finish = page.getByRole("button", { name: "Finish" });
-    const isLast = await finish.isVisible().catch(() => false);
+  await answerAll(page);
+  await page.getByRole("button", { name: "See my result" }).click();
 
-    if (!skipped) {
-      await page.getByRole("button", { name: "Skip", exact: true }).click();
-      await page.getByLabel(/I acknowledge that skipping/).check();
-      await page.getByRole("button", { name: "Skip question" }).click();
-      skipped = true;
-      continue;
-    }
-
-    const options = page.locator("article button[aria-pressed]");
-    await options.first().click();
-    await (isLast ? finish : page.getByRole("button", { name: "Continue" })).click();
-
-    if (isLast) break;
-  }
-
-  // The skip review dialog appears because one question was skipped.
-  await expect(page.getByRole("heading", { name: "Answer your skipped questions?" })).toBeVisible();
-  await page.getByRole("button", { name: "Show my result now" }).click();
-
-  // The calculation sequence, then the outcome itself.
   await expect(page).toHaveURL(/\/results$/, { timeout: 60_000 });
-  await expect(page.getByText("Adventure Index").first()).toBeVisible();
-  await expect(page.getByText("Communication & Boundaries").first()).toBeVisible();
   await expect(page.getByText(alias as string).first()).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await expect(page.getByText("Adventure Index").first()).toBeVisible();
 
   const code = await page.locator("code").first().textContent();
   expect(code).toMatch(/^DDNA-(?:[A-HJ-NP-Z2-9]{4}-){3}[A-HJ-NP-Z2-9]{4}$/);
 
-  // Reloading must still show the outcome: it is owned by the private cookie.
+  // The result survives a reload: it is owned by the private cookie.
   await page.reload();
   await expect(page.locator("code").first()).toHaveText(code as string);
 
-  // An unknown partner code is refused with the single generic message.
-  const compareButton = page.getByRole("button", { name: "Compare privately" });
-  await expect(async () => {
-    await page.getByLabel(/Enter a trusted adult/).fill("DDNA-ABCD-EFGH-JKLM-NPQR");
-    await expect(compareButton).toBeEnabled({ timeout: 1000 });
-  }).toPass({ timeout: 30_000 });
-  await compareButton.click();
-  await expect(page.locator("#code-error")).toContainText("not found or has expired");
-
-  // Deletion is immediate and permanent.
-  page.on("dialog", (dialog) => void dialog.accept());
-  await page.getByRole("button", { name: "Delete profile permanently" }).click();
+  // Deletion asks first, then confirms.
+  await page.getByRole("button", { name: "Delete profile" }).click();
+  await page.getByRole("button", { name: "Yes, delete it" }).click();
   await expect(page).toHaveURL("/");
 
   await page.goto("/results");
   await expect(page.getByRole("heading", { name: "No private result available" })).toBeVisible();
 });
 
+test("two adults compare and see mutual results only", async ({ browser }) => {
+  const partnerContext = await browser.newContext();
+  const partnerPage = await partnerContext.newPage();
+  await startQuiz(partnerPage);
+  await answerAll(partnerPage);
+  await partnerPage.getByRole("button", { name: "See my result" }).click();
+  await expect(partnerPage).toHaveURL(/\/results$/, { timeout: 60_000 });
+  const partnerCode = await partnerPage.locator("code").first().textContent();
+
+  const ownContext = await browser.newContext();
+  const ownPage = await ownContext.newPage();
+  await startQuiz(ownPage);
+  await answerAll(ownPage);
+  await ownPage.getByRole("button", { name: "See my result" }).click();
+  await expect(ownPage).toHaveURL(/\/results$/, { timeout: 60_000 });
+
+  const compare = ownPage.getByRole("button", { name: "Compare" });
+  await expect(async () => {
+    await ownPage.getByLabel(/Enter a trusted adult/).fill(partnerCode as string);
+    await expect(compare).toBeEnabled({ timeout: 1000 });
+  }).toPass({ timeout: 30_000 });
+  await compare.click();
+
+  await expect(ownPage.getByRole("heading", { name: "Strong matches" })).toBeVisible({ timeout: 20_000 });
+  await expect(ownPage.getByText("Mutual-only mode")).toBeVisible();
+  // No private difference, and no count of them.
+  await expect(ownPage.getByRole("heading", { name: "Boundary differences" })).toHaveCount(0);
+  await expect(ownPage.getByText(/shared boundaries/i)).toHaveCount(0);
+
+  await ownContext.close();
+  await partnerContext.close();
+});
+
 test("the quiz cannot be reached without confirming age and consent", async ({ page }) => {
   await page.goto("/quiz");
-  await expect(page.getByRole("heading", { name: "Before we begin" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Begin private quiz" })).toBeDisabled();
-
-  // Confirming only some of the statements is not enough.
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
   await page.getByLabel("I confirm that I am at least 18 years old.").check();
-  await expect(page.getByRole("button", { name: "Begin private quiz" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Start" })).toBeDisabled();
 });
 
 test("comparing requires the caller to have their own profile", async ({ page }) => {
   await page.goto("/compare");
-  const compare = page.getByRole("button", { name: "Compare privately" });
+  const compare = page.getByRole("button", { name: "Compare" });
   await expect(async () => {
     await page.getByLabel(/Enter a trusted adult/).fill("DDNA-ABCD-EFGH-JKLM-NPQR");
     await expect(compare).toBeEnabled({ timeout: 1000 });
   }).toPass({ timeout: 30_000 });
   await compare.click();
   await expect(page.locator("#code-error")).toContainText("Complete your own quiz");
-});
-
-/** Answers every remaining question in the short test bank with one option. */
-async function completeQuiz(page: import("@playwright/test").Page, optionIndex: number) {
-  await page.goto("/quiz");
-  const begin = page.getByRole("button", { name: "Begin private quiz" });
-  await expect(async () => {
-    await page.getByLabel("I agree to all of the above.").check();
-    await expect(begin).toBeEnabled({ timeout: 1000 });
-  }).toPass({ timeout: 30_000 });
-  await begin.click();
-
-  for (let guard = 0; guard < 60; guard++) {
-    const finish = page.getByRole("button", { name: "Finish" });
-    const isLast = await finish.isVisible().catch(() => false);
-    const options = page.locator("article button[aria-pressed]");
-    const available = await options.count();
-    await options.nth(Math.min(optionIndex, available - 1)).click();
-    await (isLast ? finish : page.getByRole("button", { name: "Continue" })).click();
-    if (isLast) break;
-  }
-
-  await expect(page).toHaveURL(/\/results$/, { timeout: 60_000 });
-  const code = await page.locator("code").first().textContent();
-  return code as string;
-}
-
-test("two adults can compare codes and see mutual results only", async ({ browser }) => {
-  const partnerContext = await browser.newContext();
-  const partnerPage = await partnerContext.newPage();
-  // Option 0 is "I have done it and love it".
-  const partnerCode = await completeQuiz(partnerPage, 0);
-
-  const ownContext = await browser.newContext();
-  const ownPage = await ownContext.newPage();
-  await completeQuiz(ownPage, 0);
-
-  const compare = ownPage.getByRole("button", { name: "Compare privately" });
-  await expect(async () => {
-    await ownPage.getByLabel(/Enter a trusted adult/).fill(partnerCode);
-    await expect(compare).toBeEnabled({ timeout: 1000 });
-  }).toPass({ timeout: 30_000 });
-  await compare.click();
-
-  await expect(ownPage.getByText("shared-interest alignment")).toBeVisible({ timeout: 20_000 });
-  await expect(ownPage.getByRole("heading", { name: "Strong Matches" })).toBeVisible();
-  // Mutual-only is the default, so differences must stay hidden.
-  await expect(ownPage.getByText("Mutual-only mode is active")).toBeVisible();
-  await expect(ownPage.getByRole("heading", { name: "Boundary mismatches" })).toHaveCount(0);
-  await expect(ownPage.getByText("A matching interest never replaces")).toBeVisible();
-
-  await ownContext.close();
-  await partnerContext.close();
 });

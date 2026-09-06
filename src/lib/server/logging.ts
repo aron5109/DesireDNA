@@ -25,10 +25,22 @@ function describe(error: unknown): string {
   return "UnknownError";
 }
 
-/** Raised when the deployment is missing or misconfiguring server secrets. */
+export interface ConfigurationDetails {
+  missing: string[];
+  invalid: { name: string; reason: string }[];
+}
+
+/**
+ * Raised when the deployment is missing or misconfiguring server secrets.
+ * `details` carries variable names and reasons only — never a value — so it is
+ * safe to show to whoever is trying to get the deployment working.
+ */
 export class ConfigurationError extends Error {
-  constructor(message: string) {
+  readonly details?: ConfigurationDetails;
+
+  constructor(message: string, details?: ConfigurationDetails) {
     super(message);
     this.name = "ConfigurationError";
+    this.details = details;
   }
 }

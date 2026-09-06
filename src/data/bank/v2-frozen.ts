@@ -1,6 +1,16 @@
+/**
+ * FROZEN question bank, version 2026.2.
+ *
+ * Profiles created before the 2026.3 redesign reference these ids. Nothing here
+ * may change: altering a topic, an option score, or the order would silently
+ * reinterpret answers that people already gave. New work goes in v3.ts.
+ *
+ * The v2 answer model has no separation between interest and experience, so v2
+ * profiles are comparable only with other v2 profiles.
+ */
 import type { AnswerOption, Question } from "@/lib/quiz/types";
-export const QUIZ_VERSION="2026.2";
-export const STANDARD_OPTIONS = [
+export const QUIZ_VERSION_V2 = "2026.2";
+export const V2_STANDARD_OPTIONS = [
  {value:"like_it",label:"I have done it and love it",score:100},{value:"tried_neutral",label:"I have tried it and feel neutral",score:50},{value:"tried_disliked",label:"I have tried it and did not like it",score:10},{value:"want_to_try",label:"I have not done it, but want to try",score:75},{value:"maybe_conditions",label:"Maybe, under the right conditions",score:45},{value:"not_interested",label:"I am not interested",score:0},{value:"hard_limit",label:"This is a hard limit",score:0,boundary:true}
 ] as const satisfies readonly AnswerOption[];
 const groups = {
@@ -42,10 +52,10 @@ function roleFor(topic: string): Question["role"] {
   return "self";
 }
 
-export const questions: Question[] = Object.entries(groups).flatMap(([categoryId, topics]) =>
+export const V2_QUESTIONS: Question[] = Object.entries(groups).flatMap(([categoryId, topics]) =>
   topics.map((topic, index) => ({
     id: `${categoryId}_${String(index + 1).padStart(2, "0")}`,
-    version: QUIZ_VERSION,
+    version: QUIZ_VERSION_V2,
     categoryId,
     categoryLabel: labels[categoryId],
     shortLabel: topic,
@@ -59,36 +69,19 @@ export const questions: Question[] = Object.entries(groups).flatMap(([categoryId
     responseType: "single_choice" as const,
     role: roleFor(topic),
     intensity: intensityByCategory[categoryId] ?? 2,
-    answerOptions: STANDARD_OPTIONS,
+    answerOptions: V2_STANDARD_OPTIONS,
     scoringEnabled: true,
     comparisonEnabled: true,
     sensitiveTags: categoryId === "fluids" ? ["optional_intense"] : [],
     sortOrder: order++,
   })),
 );
-export const pornCategories=["Amateur adults","Professional or cinematic","Romantic","Couples","Solo women","Solo men","Lesbian adults","Gay male adults","Bisexual adults","Trans adults","Oral-focused","Anal-focused","Toys","Consensual rough content","BDSM","Dominance","Submission","Adult role-play","Threesomes with two women and one man","Threesomes with two men and one woman","Group sex","Consensual gangbang","Mature adults","Adult animation with clearly adult characters only","Voyeur or exhibition fantasy involving informed adults"];
-questions.push({id:"porn_categories",version:QUIZ_VERSION,categoryId:"porn",categoryLabel:"Adult Media Preferences",shortLabel:"adult media categories",prompt:"Which adult-only media categories do you enjoy?",helpText:"Optional. Select any that apply. Only mutual selections can appear in a comparison.",responseType:"multi_select",role:"self",intensity:1,answerOptions:pornCategories.map(value=>({value,label:value,score:0})),scoringEnabled:false,comparisonEnabled:true,sensitiveTags:["adult_media"],sortOrder:order++});
-export const raceSensitiveQuestion:Question={...questions.at(-1)!,id:"porn_racial_ethnic",shortLabel:"multi-ethnic adult media",prompt:"Do you select interracial or multi-ethnic adult content?",responseType:"single_choice",answerOptions:STANDARD_OPTIONS,scoringEnabled:false,comparisonEnabled:false,sensitiveTags:["racial_ethnic_data"],sortOrder:order++};
-export function getQuestions() {
-  const enabled =
-    process.env.NEXT_PUBLIC_ENABLE_RACE_SENSITIVE_ITEMS === "true"
-      ? [...questions, raceSensitiveQuestion]
-      : questions;
-
-  // Explicitly impossible in a production build. This keeps Playwright runs
-  // short without changing the production question bank.
-  if (
-    process.env.NODE_ENV !== "production" &&
-    process.env.NEXT_PUBLIC_E2E_SHORT_QUIZ === "true"
-  ) {
-    const firstByCategory = new Map<string, Question>();
-    for (const question of enabled) {
-      if (!firstByCategory.has(question.categoryId)) {
-        firstByCategory.set(question.categoryId, question);
-      }
-    }
-    return [...firstByCategory.values()];
-  }
-
-  return enabled;
+export const V2_PORN_CATEGORIES = ["Amateur adults","Professional or cinematic","Romantic","Couples","Solo women","Solo men","Lesbian adults","Gay male adults","Bisexual adults","Trans adults","Oral-focused","Anal-focused","Toys","Consensual rough content","BDSM","Dominance","Submission","Adult role-play","Threesomes with two women and one man","Threesomes with two men and one woman","Group sex","Consensual gangbang","Mature adults","Adult animation with clearly adult characters only","Voyeur or exhibition fantasy involving informed adults"];
+V2_QUESTIONS.push({id:"porn_categories",version: QUIZ_VERSION_V2,categoryId:"porn",categoryLabel:"Adult Media Preferences",shortLabel:"adult media categories",prompt:"Which adult-only media categories do you enjoy?",helpText:"Optional. Select any that apply. Only mutual selections can appear in a comparison.",responseType:"multi_select",role:"self",intensity:1,answerOptions: V2_PORN_CATEGORIES.map(value=>({value,label:value,score:0})),scoringEnabled:false,comparisonEnabled:true,sensitiveTags:["adult_media"],sortOrder:order++});
+export const V2_RACE_SENSITIVE: Question = { ...V2_QUESTIONS.at(-1)!,id:"porn_racial_ethnic",shortLabel:"multi-ethnic adult media",prompt:"Do you select interracial or multi-ethnic adult content?",responseType:"single_choice",answerOptions: V2_STANDARD_OPTIONS,scoringEnabled:false,comparisonEnabled:false,sensitiveTags:["racial_ethnic_data"],sortOrder:order++};
+/** The frozen v2 bank, including the flagged item when it is enabled. */
+export function getV2Questions(): Question[] {
+  return process.env.NEXT_PUBLIC_ENABLE_RACE_SENSITIVE_ITEMS === "true"
+    ? [...V2_QUESTIONS, V2_RACE_SENSITIVE]
+    : V2_QUESTIONS;
 }
