@@ -46,8 +46,20 @@ export async function POST(req: NextRequest) {
     // turn into unlimited guessing at other people's codes.
     for (const decision of [byIp, byProfile]) {
       if (decision.degraded) {
+        // Fails closed either way, but the two causes need different words:
+        // one passes on its own, the other needs a migration applied.
         return NextResponse.json(
-          { error: "Comparison is temporarily unavailable. Please try again shortly." },
+          {
+            error: decision.notInstalled
+              ? "Comparison is unavailable because the database is not fully set up."
+              : "Comparison is temporarily unavailable. Please try again shortly.",
+            ...(decision.reason ? { storageProblem: decision.reason } : {}),
+            ...(decision.notInstalled
+              ? {
+                  hint: "Apply supabase/migrations/202609060001_atomic_rate_limit.sql, then run `notify pgrst, 'reload schema';`. Check /api/health for the full setup state.",
+                }
+              : {}),
+          },
           { status: 503, headers: { ...noStore, "Retry-After": String(decision.retryAfterSeconds) } },
         );
       }

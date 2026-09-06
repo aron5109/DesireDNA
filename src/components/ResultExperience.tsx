@@ -64,11 +64,20 @@ export function CompareForm() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ desireCode: code, ...(turnstileToken ? { turnstileToken } : {}) }),
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string; comparison?: Comparison };
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        comparison?: Comparison;
+        storageProblem?: string;
+        hint?: string;
+      };
       if (!response.ok) {
         turnstile.handle.reset();
         setComparison(null);
-        setError(data.error ?? "Comparison failed. Please try again.");
+        setError(
+          [data.error ?? "Comparison failed. Please try again.", data.storageProblem, data.hint]
+            .filter(Boolean)
+            .join(" "),
+        );
       } else {
         setComparison(data.comparison ?? null);
       }

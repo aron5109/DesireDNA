@@ -4,13 +4,17 @@ import type { NextRequest } from "next/server";
 import { db } from "./supabase";
 import { env } from "./env";
 import { hmac } from "./crypto";
-import { ConfigurationError, logServerError } from "./logging";
+import { ConfigurationError, describeStorageError, logServerError } from "./logging";
 
 export interface RateLimitDecision {
   allowed: boolean;
   retryAfterSeconds: number;
   /** True when the limiter itself could not be consulted. */
   degraded: boolean;
+  /** Why it could not be consulted. Schema-level detail only, never a value. */
+  reason?: string;
+  /** True when the limiter is absent rather than briefly unreachable. */
+  notInstalled?: boolean;
 }
 
 /**
@@ -63,7 +67,15 @@ async function consume(
   } catch (error) {
     if (error instanceof ConfigurationError) throw error;
     logServerError(`rate-limit:${action}`, error);
-    return { allowed: false, retryAfterSeconds: 30, degraded: true };
+
+    const reason = describeStorageError(error) ?? undefined;
+    // A missing function is not a blip: retrying will never help, so callers
+    // can say so rather than promising it will pass.
+    const notInstalled = reason
+      ? /PGRST202|could not find the function|does not exist|schema cache/i.test(reason)
+      : false;
+
+    return { allowed: false, retryAfterSeconds: 30, degraded: true, reason, notInstalled };
   }
 }
 

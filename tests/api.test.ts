@@ -374,6 +374,22 @@ describe("rate limiting", () => {
     expect(Number(last?.headers.get("retry-after"))).toBeGreaterThan(0);
   });
 
+  it("says a missing limiter needs installing, not retrying", async () => {
+    await createProfile(keen());
+    database.failure = "PGRST202: Could not find the function public.consume_rate_limit in the schema cache";
+
+    const response = await compareRoute.POST(
+      post("http://localhost/api/compare", { desireCode: "DDNA-ABCD-EFGH-JKLM-NPQR" }),
+    );
+    database.failure = null;
+
+    const body = (await response.json()) as { error: string; hint?: string };
+    expect(response.status).toBe(503);
+    // "Try again shortly" would be a lie: retrying never installs a function.
+    expect(body.error).not.toContain("temporarily");
+    expect(body.hint).toContain("202609060001_atomic_rate_limit.sql");
+  });
+
   it("fails closed for code lookups when the limiter is unavailable", async () => {
     await createProfile(keen());
     database.failure = "limiter down";
