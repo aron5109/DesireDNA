@@ -25,9 +25,19 @@ const APPLY_INITIAL =
 const APPLY_LIMITER =
   "Apply supabase/migrations/202609060001_atomic_rate_limit.sql in the Supabase SQL editor.";
 
-/** Postgres/PostgREST signals for "this object does not exist". */
-const missingRelation = (message: string) =>
-  /does not exist|could not find the table|schema cache/i.test(message);
+const RELOAD_CACHE =
+  "The table exists but Supabase's API layer has not picked it up. Run `notify pgrst, 'reload schema';` in the SQL editor, or restart the API from Settings → API.";
+
+/**
+ * PostgREST reports a stale schema cache and a genuinely absent table very
+ * differently, and the fixes are opposite: one needs a cache reload, the other
+ * needs the migration applied. Telling them apart matters — advising someone to
+ * re-run a migration they already ran sends them in circles.
+ */
+const staleSchemaCache = (message: string, code?: string) =>
+  code === "PGRST205" || /schema cache/i.test(message);
+
+const missingRelation = (message: string) => /does not exist/i.test(message);
 
 async function checkTable(table: string, fix: string): Promise<CheckResult> {
   try {
@@ -36,11 +46,17 @@ async function checkTable(table: string, fix: string): Promise<CheckResult> {
     const { error } = await db().from(table).select("id").limit(1);
     if (!error) return { name: `table ${table}`, ok: true };
 
+    if (staleSchemaCache(error.message, error.code)) {
+      return { name: `table ${table}`, ok: false, problem: "is not in the API schema cache", fix: RELOAD_CACHE };
+    }
+    if (missingRelation(error.message)) {
+      return { name: `table ${table}`, ok: false, problem: "does not exist", fix };
+    }
     return {
       name: `table ${table}`,
       ok: false,
-      problem: missingRelation(error.message) ? "does not exist" : error.message,
-      fix: missingRelation(error.message) ? fix : "Check the service-role key and project URL.",
+      problem: error.message,
+      fix: "Check the service-role key and project URL.",
     };
   } catch (error) {
     return {
@@ -70,6 +86,9 @@ async function checkLimiter(): Promise<CheckResult> {
     if (error && /invalid rate limit parameters/i.test(error.message)) return { name, ok: true };
     if (!error) return { name, ok: true };
 
+    if (staleSchemaCache(error.message, error.code)) {
+      return { name, ok: false, problem: "is not in the API schema cache", fix: RELOAD_CACHE };
+    }
     return {
       name,
       ok: false,

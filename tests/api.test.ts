@@ -159,6 +159,19 @@ describe("POST /api/profile", () => {
     expect(body.hint).toContain("/api/health");
   });
 
+  it("tells a stale schema cache apart from a missing table", async () => {
+    // PostgREST reports a cache it has not reloaded; the table does exist.
+    database.failure = "PGRST205: Could not find the table 'public.quiz_profiles' in the schema cache";
+    const response = await profileRoute.POST(post("http://localhost/api/profile", submission(keen())));
+    database.failure = null;
+
+    const body = (await response.json()) as { storageProblem?: string; hint?: string };
+    expect(body.storageProblem).toContain("schema cache");
+    // The fix is a reload, not re-running a migration that already ran.
+    expect(body.hint).toContain("reload schema");
+    expect(body.hint).not.toContain("/api/health");
+  });
+
   it("never passes a stored value through the storage reason", async () => {
     const { describeStorageError } = await import("@/lib/server/logging");
 

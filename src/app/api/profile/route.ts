@@ -54,12 +54,22 @@ function failure(scope: string, error: unknown): NextResponse {
   // A storage failure is almost always a schema that was never applied, so the
   // reason is passed through: it names the missing object, never a stored value.
   const reason = describeStorageError(error);
+  const staleCache = reason ? /PGRST205|schema cache/i.test(reason) : false;
+
   return NextResponse.json(
     {
       error: reason
         ? "Your answers could not be saved because the database is not set up correctly."
         : "We could not reach your private storage. Please try again.",
-      ...(reason ? { storageProblem: reason, hint: "Open /api/health for the full setup check." } : {}),
+      ...(reason
+        ? {
+            storageProblem: reason,
+            // A stale cache and a missing table need opposite fixes.
+            hint: staleCache
+              ? "The table exists but Supabase's API layer has not picked it up. Run `notify pgrst, 'reload schema';` in the SQL editor, or restart the API from Settings → API."
+              : "Open /api/health for the full setup check.",
+          }
+        : {}),
     },
     { status: 500, headers: noStore },
   );
