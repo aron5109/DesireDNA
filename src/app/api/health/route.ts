@@ -34,7 +34,7 @@ export async function GET() {
     database = await databaseReport();
   } catch (error) {
     logServerError("health:database", error);
-    database = { ok: false, checks: [{ name: "database", ok: false, problem: "unreachable" }] };
+    database = { ok: false, project: "unknown", checks: [{ name: "database", ok: false, problem: "unreachable" }] };
   }
 
   const failing = database.checks.filter((check) => !check.ok);
@@ -44,6 +44,8 @@ export async function GET() {
       status: database.ok ? "ok" : "database_not_ready",
       missing: [],
       invalid: [],
+      // Compare this against the project you are running SQL in.
+      connectedTo: database.project,
       database: database.checks,
       ...(failing.length
         ? { hint: failing.map((check) => `${check.name} ${check.problem}. ${check.fix ?? ""}`.trim()).join(" ") }

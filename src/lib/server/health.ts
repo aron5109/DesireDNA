@@ -1,5 +1,6 @@
 import "server-only";
 
+import { env } from "./env";
 import { db } from "./supabase";
 
 /**
@@ -100,12 +101,27 @@ async function checkLimiter(): Promise<CheckResult> {
   }
 }
 
-export async function databaseReport(): Promise<{ ok: boolean; checks: CheckResult[] }> {
+/**
+ * The Supabase project the server is actually talking to.
+ *
+ * Not a credential — it is the project's public URL — and it is the fastest way
+ * to catch SQL being run in one project while the app points at another, which
+ * looks identical to a stale cache from the outside.
+ */
+export function connectedProject(): string {
+  try {
+    return new URL(env().SUPABASE_URL).host;
+  } catch {
+    return "unknown";
+  }
+}
+
+export async function databaseReport(): Promise<{ ok: boolean; project: string; checks: CheckResult[] }> {
   const checks = await Promise.all([
     checkTable("quiz_profiles", APPLY_INITIAL),
     checkTable("rate_limit_events", APPLY_INITIAL),
     checkLimiter(),
   ]);
 
-  return { ok: checks.every((check) => check.ok), checks };
+  return { ok: checks.every((check) => check.ok), project: connectedProject(), checks };
 }
